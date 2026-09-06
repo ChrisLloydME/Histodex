@@ -15,9 +15,6 @@ final class ArchiveBrowserController: NSViewController, NSTableViewDataSource, N
     private let previous = NSButton(title: "Previous 100", target: nil, action: nil)
     private let next = NSButton(title: "Next 100", target: nil, action: nil)
     private let pageLabel = NSTextField(labelWithString: "")
-    private let importButton = NSButton(title: "Import Folder…", target: nil, action: nil)
-    private let refreshButton = NSButton(title: "Import Updates", target: nil, action: nil)
-    private let cancel = NSButton(title: "Cancel Import", target: nil, action: nil)
     private var conversations: [Conversation] = []
     private var hits: [SearchHit] = []
     private var page: [ArchiveItem] = []
@@ -25,8 +22,6 @@ final class ArchiveBrowserController: NSViewController, NSTableViewDataSource, N
     private var expanded: Set<Int64> = []
     private var generation = UUID()
     private var searchGeneration = UUID()
-    private var importing: Task<Void, Never>?
-    private var lastImportSummary = ""
     private var detailWindows: [NSWindowController] = []
     private var showingSearch: Bool { scope.selectedSegment == 1 && !search.stringValue.isEmpty }
 
@@ -47,10 +42,7 @@ final class ArchiveBrowserController: NSViewController, NSTableViewDataSource, N
         scope.selectedSegment = 0; scope.target = self; scope.action = #selector(scopeChanged)
         configure(sidebar); sidebar.rowHeight = 76; sidebar.setAccessibilityIdentifier("conversationList")
         let sideScroll = NSScrollView(); sideScroll.hasVerticalScroller = true; sideScroll.documentView = sidebar
-        importButton.target = self; importButton.action = #selector(chooseSource(_:)); importButton.bezelStyle = .rounded
-        refreshButton.target = self; refreshButton.action = #selector(importUpdates); refreshButton.bezelStyle = .rounded
-        refreshButton.isEnabled = UserDefaults.standard.data(forKey: "sourceBookmark") != nil
-        let leftStack = NSStackView(views: [search, scope, sideScroll, importButton, refreshButton]); leftStack.orientation = .vertical; leftStack.alignment = .leading; leftStack.spacing = 10
+        let leftStack = NSStackView(views: [search, scope, sideScroll]); leftStack.orientation = .vertical; leftStack.alignment = .leading; leftStack.spacing = 10
         pin(leftStack, to: left, inset: 14)
         search.widthAnchor.constraint(equalTo: leftStack.widthAnchor).isActive = true
         sideScroll.widthAnchor.constraint(equalTo: leftStack.widthAnchor).isActive = true
@@ -66,8 +58,7 @@ final class ArchiveBrowserController: NSViewController, NSTableViewDataSource, N
         transcriptScroll.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification, object: transcriptScroll.contentView)
         status.font = .systemFont(ofSize: 11); status.textColor = .secondaryLabelColor; status.lineBreakMode = .byTruncatingMiddle
-        cancel.target = self; cancel.action = #selector(cancelImport); cancel.isHidden = true
-        let footer = NSStackView(views: [status, cancel]); footer.spacing = 8
+        let footer = NSStackView(views: [status]); footer.spacing = 8
         let rightStack = NSStackView(views: [titleLabel, subtitle, navigation, transcriptScroll, footer]); rightStack.orientation = .vertical; rightStack.alignment = .leading; rightStack.spacing = 12
         pin(rightStack, to: right, inset: 20)
         for child in [titleLabel, subtitle, transcriptScroll, footer] { child.widthAnchor.constraint(equalTo: rightStack.widthAnchor).isActive = true }
@@ -103,7 +94,7 @@ final class ArchiveBrowserController: NSViewController, NSTableViewDataSource, N
                 conversations = list; hits = results; sidebar.reloadData()
                 if searching && hits.isEmpty { status.stringValue = "No matching archived content" }
                 else if searching { status.stringValue = "\(hits.count) results · Select one to jump to its exact item" }
-                else { status.stringValue = lastImportSummary.isEmpty ? "\(list.count) archived conversations · Offline" : lastImportSummary }
+                else { status.stringValue = "\(list.count) archived conversations" }
                 if let current = selected, let updated = list.first(where: { $0.id == current.id }) {
                     selected = updated
                     titleLabel.stringValue = updated.title
@@ -204,57 +195,8 @@ final class ArchiveBrowserController: NSViewController, NSTableViewDataSource, N
         let ordinal = page[range.location].ordinal
         Task { try? await store.savePosition(conversationID: selected.id, ordinal: ordinal) }
     }
-    @objc func chooseSource(_ sender: Any?) {
-        guard importing == nil else { return }
-        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false; panel.showsHiddenFiles = true
-        panel.title = "Import Codex History"; panel.message = "Choose your .codex data folder. Histodex copies sessions into its own archive and never modifies the source."; panel.prompt = "Import Read-Only"
-        guard let window = view.window else { return }
-        panel.beginSheetModal(for: window) { [weak self] response in
-            guard response == .OK, let url = panel.url else { return }; self?.importSource(url)
-        }
-    }
-    @objc private func importUpdates() {
-        guard let data = UserDefaults.standard.data(forKey: "sourceBookmark") else { return }
-        do {
-            var stale = false
-            let url = try URL(resolvingBookmarkData: data, options: [.withSecurityScope, .withoutUI], relativeTo: nil, bookmarkDataIsStale: &stale)
-            importSource(url)
-        } catch { show(error) }
-    }
-    func importSource(_ url: URL) {
-        guard importing == nil else { return }
-        let accessed = url.startAccessingSecurityScopedResource()
-        if let data = try? url.bookmarkData(options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess], includingResourceValuesForKeys: nil, relativeTo: nil) { UserDefaults.standard.set(data, forKey: "sourceBookmark"); refreshButton.isEnabled = true }
-        setImporting(true)
-        importing = Task {
-            defer { if accessed { url.stopAccessingSecurityScopedResource() }; importing = nil; setImporting(false) }
-            do {
-                let report = try await store.importDirectory(url) { [weak self] progress in
-                    Task { @MainActor in self?.status.stringValue = "\(progress.completed)/\(progress.total) · \(progress.filename)" }
-                }
-                finish(report)
-            } catch is CancellationError { status.stringValue = "Import canceled. Completed snapshots and conversations remain archived." }
-            catch { show(error) }
-        }
-    }
-    @objc func reparse(_ sender: Any?) {
-        guard importing == nil else { return }; setImporting(true)
-        status.stringValue = "Reparsing owned raw snapshots…"
-        importing = Task {
-            defer { importing = nil; setImporting(false) }
-            do { finish(try await store.reparseArchive()) } catch { show(error) }
-        }
-    }
-    @objc private func cancelImport() { importing?.cancel() }
-    private func setImporting(_ busy: Bool) { importButton.isEnabled = !busy; refreshButton.isEnabled = !busy && UserDefaults.standard.data(forKey: "sourceBookmark") != nil; cancel.isHidden = !busy }
-    private func finish(_ report: ImportReport) {
-        let message = "\(report.imported) imported · \(report.unchanged) unchanged · \(report.errors.count) failed"
-        lastImportSummary = message
+    func archiveDidChange() {
         reloadSidebar()
-        status.stringValue = message
-        if !report.errors.isEmpty {
-            let alert = NSAlert(); alert.messageText = "Import completed with errors"; alert.informativeText = message + "\n\n" + report.errors.prefix(12).joined(separator: "\n"); alert.runModal()
-        }
         if let selected { select(selected) }
     }
     private func openDetail(_ item: ArchiveItem) {
