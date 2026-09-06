@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		6E3C6A9D304DB1C4002F659D /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 6E3C6A9C304DB1C4002F659D /* AppIcon.icon */; };
 		ABCD00000000000000000001 /* HistodexCore in Frameworks */ = {isa = PBXBuildFile; productRef = ABCD00000000000000000002 /* HistodexCore */; };
 /* End PBXBuildFile section */
 
@@ -31,6 +32,7 @@
 		6E3C69D6304D6196002F659D /* Histodex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Histodex.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6E3C69E6304D6198002F659D /* HistodexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HistodexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6E3C69F0304D6198002F659D /* HistodexUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HistodexUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		6E3C6A9C304DB1C4002F659D /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -80,6 +82,7 @@
 		6E3C69CD304D6196002F659D = {
 			isa = PBXGroup;
 			children = (
+				6E3C6A9C304DB1C4002F659D /* AppIcon.icon */,
 				6E3C69D8304D6196002F659D /* Histodex */,
 				6E3C69E9304D6198002F659D /* HistodexTests */,
 				6E3C69F3304D6198002F659D /* HistodexUITests */,
@@ -221,6 +224,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6E3C6A9D304DB1C4002F659D /* AppIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
