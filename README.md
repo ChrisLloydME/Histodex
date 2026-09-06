@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Docs/Images/AppIcon-1024x1024@1x.png" alt="Histodex app icon" width="240">
+</p>
+
 # Histodex
 
 A native, offline macOS archive for Codex conversation history. **Codex is an import format. Histodex is the archive.**
