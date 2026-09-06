@@ -25,24 +25,41 @@ import Markdown
             if let link = node as? Markdown.Link, let target = link.destination, let url = URL(string: target), ["https", "http", "mailto"].contains(url.scheme ?? "") {
                 style[.link] = url; style[.foregroundColor] = NSColor.linkColor
             }
-            if node is BlockQuote { style[.foregroundColor] = NSColor.secondaryLabelColor; append("│ ", style) }
+            if node is BlockQuote {
+                style[.foregroundColor] = NSColor.secondaryLabelColor
+                let quote = paragraph.mutableCopy() as! NSMutableParagraphStyle
+                quote.headIndent = CGFloat((depth + 1) * 16); quote.firstLineHeadIndent = quote.headIndent
+                style[.paragraphStyle] = quote
+            }
             if node is SoftBreak { append(" ", style); return }
             if node is LineBreak { append("\n", style); return }
             if node is ThematicBreak { append("────────────\n", style); return }
             if let image = node as? Markdown.Image { append("[Image: \(image.plainText)]", style); return }
             if let html = node as? HTMLBlock { append(html.rawHTML, style); return }
             if let html = node as? InlineHTML { append(html.rawHTML, style); return }
-            if let list = node as? OrderedList {
-                for (index, child) in list.children.enumerated() { append("\(list.startIndex + UInt(index)). ", style); walk(child, style, depth: depth + 1) }
+            if node is OrderedList || node is UnorderedList {
+                let listStyle = paragraph.mutableCopy() as! NSMutableParagraphStyle
+                listStyle.firstLineHeadIndent = CGFloat(depth * 20)
+                listStyle.headIndent = CGFloat((depth + 1) * 20)
+                listStyle.tabStops = [NSTextTab(textAlignment: .left, location: listStyle.headIndent)]
+                listStyle.paragraphSpacing = 4
+                style[.paragraphStyle] = listStyle
+                for (index, child) in node.children.enumerated() {
+                    let marker = (node as? OrderedList).map { "\($0.startIndex + UInt(index))." } ?? "•"
+                    append(marker + "\t", style); walk(child, style, depth: depth + 1)
+                }
                 append("\n", style); return
             }
-            if node is UnorderedList {
-                for child in node.children { append(String(repeating: "  ", count: depth) + "• ", style); walk(child, style, depth: depth + 1) }
-                append("\n", style); return
+            if node is Table {
+                let tableStyle = paragraph.mutableCopy() as! NSMutableParagraphStyle
+                tableStyle.tabStops = (1...12).map { NSTextTab(textAlignment: .left, location: CGFloat($0 * 160)) }
+                tableStyle.paragraphSpacing = 6
+                style[.paragraphStyle] = tableStyle
             }
+            if node is Table.Head { style[.font] = NSFont.systemFont(ofSize: 13, weight: .semibold) }
             if node is Table.Cell { for child in node.children { walk(child, style, depth: depth) }; append("\t", style); return }
             for child in node.children { walk(child, style, depth: depth) }
-            if node is Paragraph || node is Heading || node is Table.Row { append("\n", style) }
+            if node is Paragraph || node is Heading || node is Table.Row || node is Table.Head { append("\n", style) }
         }
         walk(Document(parsing: source), base)
         return output

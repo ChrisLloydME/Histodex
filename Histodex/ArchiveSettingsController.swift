@@ -79,9 +79,9 @@ final class ArchiveSettingsController: NSViewController {
         operation = Task {
             defer { if accessed { url.stopAccessingSecurityScopedResource() }; operation = nil; setBusy(false) }
             do {
-                let report = try await store.importDirectory(url) { [weak self] value in
+                let report = try await store.importDirectory(url) { [self] value in
                     Task { @MainActor in
-                        guard let self, self.operationID == token, self.operation != nil else { return }
+                        guard self.operationID == token, self.operation != nil else { return }
                         self.progress.doubleValue = Double(value.completed) / Double(max(1, value.total))
                         self.status.stringValue = value.filename
                     }

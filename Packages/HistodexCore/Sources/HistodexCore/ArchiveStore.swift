@@ -73,7 +73,7 @@ public actor ArchiveStore {
     public func conversations(filter: String = "") throws -> [Conversation] {
         try database.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT * FROM conversations WHERE ? = '' OR instr(lower(title || ' ' || project || ' ' || startedAt), lower(?)) > 0
+                SELECT conversations.*, coalesce((SELECT substr(text,1,180) FROM items WHERE conversationID=conversations.id AND hidden=0 AND kind='message' AND role IN ('user','assistant') ORDER BY ordinal DESC LIMIT 1),'') AS preview FROM conversations WHERE ? = '' OR instr(lower(title || ' ' || project || ' ' || startedAt), lower(?)) > 0
                 ORDER BY updatedAt DESC, id LIMIT 10000
                 """, arguments: [filter, filter])
             return rows.map(Self.conversation)
@@ -117,6 +117,9 @@ public actor ArchiveStore {
 
     public func savePosition(conversationID: String, ordinal: Int) throws {
         try database.write { db in try db.execute(sql: "INSERT OR REPLACE INTO reading_positions VALUES (?,?)", arguments: [conversationID, ordinal]) }
+    }
+    public func savedPosition(conversationID: String) throws -> Int? {
+        try database.read { db in try Int.fetchOne(db, sql: "SELECT ordinal FROM reading_positions WHERE conversationID=?", arguments: [conversationID]) }
     }
     public func position(conversationID: String) throws -> Int {
         try database.read { db in try Int.fetchOne(db, sql: "SELECT ordinal FROM reading_positions WHERE conversationID=?", arguments: [conversationID]) ?? 0 }
@@ -318,7 +321,7 @@ public actor ArchiveStore {
     }
 
     private static func conversation(_ r: Row) -> Conversation {
-        Conversation(id: r["id"], title: r["title"], project: r["project"], startedAt: r["startedAt"], updatedAt: r["updatedAt"], itemCount: r["itemCount"], snapshotID: r["snapshotID"], warningCount: r["warningCount"])
+        Conversation(id: r["id"], title: r["title"], project: r["project"], startedAt: r["startedAt"], updatedAt: r["updatedAt"], itemCount: r["itemCount"], snapshotID: r["snapshotID"], warningCount: r["warningCount"], preview: r["preview"])
     }
     private static func asset(_ r: Row) -> ArchivedAsset {
         ArchivedAsset(hash: r["hash"], relativePath: r["relativePath"], mimeType: r["mimeType"] ?? "", byteSize: r["byteSize"] ?? 0, width: r["width"], height: r["height"], sourceReference: r["sourceReference"], missingReason: r["missingReason"])

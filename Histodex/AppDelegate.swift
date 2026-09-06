@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let configuration = ArchiveSettingsController(store: store); settings = configuration
             configuration.onArchiveChanged = { [weak content] in content?.archiveDidChange() }
             let window = NSWindow(contentViewController: content)
+            content.configureWindow(window)
             window.title = "Histodex"; window.setContentSize(NSSize(width: 1180, height: 820)); window.minSize = NSSize(width: 850, height: 550)
             window.center(); window.setFrameAutosaveName("ArchiveWindow")
             let controller = NSWindowController(window: window); windowController = controller

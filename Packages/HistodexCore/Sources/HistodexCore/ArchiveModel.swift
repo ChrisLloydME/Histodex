@@ -14,6 +14,7 @@ public struct Conversation: Identifiable, Sendable {
     public let itemCount: Int
     public let snapshotID: String
     public let warningCount: Int
+    public let preview: String
 }
 
 public struct ArchiveItem: Identifiable, Sendable {
