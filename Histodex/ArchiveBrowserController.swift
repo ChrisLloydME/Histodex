@@ -93,7 +93,7 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
         }
         if id == Self.infoID {
             let item = NSToolbarItem(itemIdentifier: id); item.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Conversation Info")
-            item.label = "Conversation Info"; item.toolTip = "Conversation Info"; item.target = self; item.action = #selector(showConversationInfo); item.isEnabled = selected != nil; infoItem = item; return item
+            item.autovalidates = false; item.label = "Conversation Info"; item.toolTip = "Conversation Info"; item.target = self; item.action = #selector(showConversationInfo); item.isEnabled = selected != nil; infoItem = item; return item
         }
         return nil
     }
@@ -171,7 +171,8 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
         layouts.removeAll()
         guard !entries.isEmpty else { return }
         transcript.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<numberOfRows(in: transcript)))
-        transcript.reloadData(forRowIndexes: transcript.rows(in: transcript.visibleRect).indexSet, columnIndexes: IndexSet(integer: 0))
+        let visible = transcript.rows(in: transcript.visibleRect).indexSet.intersection(IndexSet(integersIn: 0..<numberOfRows(in: transcript)))
+        transcript.reloadData(forRowIndexes: visible, columnIndexes: IndexSet(integer: 0))
     }
     private func toggle(_ id: Int64) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
@@ -203,7 +204,7 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
                 else { start = try await store.precedingPageStart(conversationID: conversation.id, before: Int.max) }
                 guard generation == token else { return }
                 loadPage(from: start, scrollTo: target, atEnd: target == nil && saved == nil)
-            } catch { applyingPage = false; show(error) }
+            } catch { guard generation == token else { return }; applyingPage = false; show(error) }
         }
     }
     private func loadPage(from ordinal: Int, scrollTo: Int? = nil, atEnd: Bool = false) {
@@ -212,10 +213,10 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
             do {
                 var items = try await store.items(conversationID: selected.id, from: ordinal)
                 if items.isEmpty && ordinal > 0 { items = try await store.items(conversationID: selected.id) }
-                let before = try await store.precedingPageStart(conversationID: selected.id, before: items.first?.ordinal ?? 0, limit: 1)
+                let earliest = try await store.items(conversationID: selected.id, limit: 1).first?.ordinal
                 let later = try await store.items(conversationID: selected.id, from: (items.last?.ordinal ?? -1) + 1, limit: 1)
                 guard generation == token else { return }
-                entries = TranscriptEntry.project(items); layouts.removeAll(); hasEarlier = before < (items.first?.ordinal ?? 0); hasLater = !later.isEmpty
+                entries = TranscriptEntry.project(items); layouts.removeAll(); hasEarlier = earliest.map { $0 < (items.first?.ordinal ?? 0) } ?? false; hasLater = !later.isEmpty
                 if let target = scrollTo, let entry = entries.first(where: { $0.contains(ordinal: target) }) { expanded.insert(entry.id) }
                 transcript.reloadData(); view.layoutSubtreeIfNeeded(); empty.isHidden = !items.isEmpty
                 if let target = scrollTo, let index = entries.firstIndex(where: { $0.contains(ordinal: target) }) { transcript.scrollRowToVisible(index + offset) }
@@ -238,7 +239,10 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
         let ordinal = entries[row].items[0].ordinal; positionTask?.cancel()
         positionTask = Task { do { try await Task.sleep(for: .milliseconds(250)); try await store.savePosition(conversationID: selected.id, ordinal: ordinal) } catch {} }
     }
-    func archiveDidChange() { reloadSidebar(); if let selected { select(selected) } }
+    func archiveDidChange() {
+        detailWindows.forEach { $0.close() }; detailWindows.removeAll()
+        reloadSidebar(); if let selected { select(selected) }
+    }
     private func openDetail(_ entry: TranscriptEntry, preferredOrdinal: Int?) {
         detailWindows.removeAll { $0.window?.isVisible != true }
         let controller = ItemDetailController(items: entry.items, store: store, selectedOrdinal: preferredOrdinal)

@@ -49,3 +49,8 @@ Huge individual JSON records, concurrent source rewrites (prefix snapshots guara
 ## Implemented refinements
 
 Archive schema v2 adds persistent source aliases for content-deduplicated snapshots and an indexed call/result lookup. Adapter v2 links command outputs, retains assets from event/response mirrors, and keeps reparsing on owned assets. Prefix resolution uses owned snapshots with cycle and byte-boundary validation; unavailable ancestry produces visible notices. Newer conversation projections are protected from older changed rollouts. Database query previews are capped independently from stored/indexed text, and the native inspector pages through complete output. See Validation.md for tested boundaries and release limitations.
+
+
+## Conversation presentation revision
+
+The Messages-inspired AppKit interface adds an owned `TranscriptEntry` display projection and a shared `TranscriptLayout` geometry cache. Routine events are grouped for disclosure without deleting archive items; exact search targets remain resolvable inside groups. Native `NSSplitViewController` and unified-toolbar navigation replace the original header/control stacks. Source permissions and maintenance move into an independent Settings controller. The database adds only a bounded conversation-preview query and optional reading-position lookup; the archive schema and import adapter are unchanged by this presentation revision. See ConversationDesign.md.

@@ -30,3 +30,10 @@
 - Reading restoration returns to an item, not a pixel within a long item. Native Markdown supports text, code, headings, lists, quotes, links and basic tab-separated table presentation. There is no syntax-highlighting dependency or browser renderer.
 - File-asset thumbnails are generated on demand; the reserved thumbnail directory is not yet a persistent cache. Generic binary/audio assets are preserved where recognized, but the initial inspector only previews images.
 - The development signature is not a distribution signature. Complete visual testing, Developer ID signing and notarization before public distribution.
+
+
+## Conversation redesign validation (2026-09-06)
+
+The follow-up redesign was validated without launching Histodex or using Computer Use, per the user's instruction. Compile-only Xcode validation succeeds. The package suite discovers 27 tests: 26 pass and the optional private real-fixture test is skipped when its environment variable is absent. Eight new presentation tests cover grouping, role hierarchy, readable structured data, collapsed payloads, shared geometry bounds, truncation/highlighting, Markdown table/list structure and outgoing link contrast. The earlier runtime smoke check above applies to the original interface only.
+
+The redesigned browser uses a Messages-style sidebar, native split-view/toolbar integration, aligned message bubbles and collapsed technical records. Import and maintenance controls are now in Settings. See ConversationDesign.md for implementation and validation details. No visual or runtime-interaction verification is claimed for this redesign.

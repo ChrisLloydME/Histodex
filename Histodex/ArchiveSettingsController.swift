@@ -13,6 +13,7 @@ final class ArchiveSettingsController: NSViewController {
     private let progress = NSProgressIndicator()
     private let status = NSTextField(wrappingLabelWithString: "Choose your Codex folder to import conversations.")
     private let errors = NSTextView(usingTextLayoutManager: true)
+    private let errorScroll = NSScrollView()
     private var operation: Task<Void, Never>?
     private var operationID = UUID()
 
@@ -20,7 +21,7 @@ final class ArchiveSettingsController: NSViewController {
     required init?(coder: NSCoder) { fatalError("Use init(store:)") }
 
     override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 570, height: 470))
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 580))
         source.lineBreakMode = .byTruncatingMiddle; source.isSelectable = true
         choose.target = self; choose.action = #selector(chooseFolder)
         update.target = self; update.action = #selector(importUpdates)
@@ -36,11 +37,11 @@ final class ArchiveSettingsController: NSViewController {
         let progressRow = NSStackView(views: [progress, cancel]); progressRow.spacing = 10
         errors.isEditable = false; errors.isSelectable = true; errors.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         errors.textContainer?.widthTracksTextView = true; errors.autoresizingMask = [.width]; errors.isVerticallyResizable = true
-        let errorScroll = NSScrollView(); errorScroll.hasVerticalScroller = true; errorScroll.documentView = errors; errorScroll.borderType = .bezelBorder
+        errorScroll.isHidden = true; errorScroll.hasVerticalScroller = true; errorScroll.documentView = errors; errorScroll.borderType = .bezelBorder
         let stack = NSStackView(views: [heading("Import Source"), source, sourceButtons, permissions, separator(), heading("Archive"), location, rebuild, maintenance, progressRow, status, errorScroll])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(stack)
-        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24), stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24), stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 22), stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -22), errorScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 60), progress.widthAnchor.constraint(greaterThanOrEqualToConstant: 350)])
+        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24), stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24), stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 22), stack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -22), errorScroll.heightAnchor.constraint(equalToConstant: 100), progress.widthAnchor.constraint(greaterThanOrEqualToConstant: 350)])
         for child in [source, permissions, location, maintenance, status, errorScroll] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         source.stringValue = UserDefaults.standard.string(forKey: "sourceDisplayPath") ?? "No folder selected"
         setBusy(false)
@@ -63,7 +64,7 @@ final class ArchiveSettingsController: NSViewController {
             var stale = false
             let url = try URL(resolvingBookmarkData: data, options: [.withSecurityScope, .withoutUI], relativeTo: nil, bookmarkDataIsStale: &stale)
             importSource(url)
-        } catch { status.stringValue = "Select the source folder again to restore read access."; errors.string = error.localizedDescription }
+        } catch { status.stringValue = "Select the source folder again to restore read access."; errors.string = error.localizedDescription; errorScroll.isHidden = false }
     }
     func importSource(_ url: URL) {
         _ = view
@@ -75,7 +76,7 @@ final class ArchiveSettingsController: NSViewController {
             UserDefaults.standard.set(url.path, forKey: "sourceDisplayPath"); source.stringValue = url.path
         } catch { /* One-time import remains available if saving the bookmark fails. */ }
         operationID = UUID(); let token = operationID
-        setBusy(true); errors.string = ""; status.stringValue = "Preparing import…"
+        setBusy(true); errors.string = ""; errorScroll.isHidden = true; status.stringValue = "Preparing import…"
         operation = Task {
             defer { if accessed { url.stopAccessingSecurityScopedResource() }; operation = nil; setBusy(false) }
             do {
@@ -88,22 +89,22 @@ final class ArchiveSettingsController: NSViewController {
                 }
                 operationID = UUID(); finish(report)
             } catch is CancellationError { operationID = UUID(); status.stringValue = "Import canceled. Completed conversations remain in your archive."; onArchiveChanged?() }
-            catch { operationID = UUID(); status.stringValue = "Import could not finish."; errors.string = error.localizedDescription; onArchiveChanged?() }
+            catch { operationID = UUID(); status.stringValue = "Import could not finish."; errors.string = error.localizedDescription; errorScroll.isHidden = false; onArchiveChanged?() }
         }
     }
     @objc func reparse() {
         guard operation == nil else { return }
-        setBusy(true); errors.string = ""; progress.isIndeterminate = true; progress.startAnimation(nil); status.stringValue = "Rebuilding conversation index…"
+        setBusy(true); errors.string = ""; errorScroll.isHidden = true; progress.isIndeterminate = true; progress.startAnimation(nil); status.stringValue = "Rebuilding conversation index…"
         operation = Task {
             defer { operation = nil; setBusy(false) }
             do { finish(try await store.reparseArchive()) }
-            catch { status.stringValue = error is CancellationError ? "Rebuild canceled." : "Index could not be rebuilt."; errors.string = error.localizedDescription }
+            catch { status.stringValue = error is CancellationError ? "Rebuild canceled." : "Index could not be rebuilt."; errors.string = error.localizedDescription; errorScroll.isHidden = false }
         }
     }
     @objc private func cancelImportTask() { operation?.cancel() }
     private func finish(_ report: ImportReport) {
         status.stringValue = "\(report.imported) imported · \(report.unchanged) unchanged · \(report.errors.count) failed"
-        errors.string = report.errors.joined(separator: "\n\n"); onArchiveChanged?()
+        errors.string = report.errors.joined(separator: "\n\n"); errorScroll.isHidden = report.errors.isEmpty; onArchiveChanged?()
     }
     private func setBusy(_ busy: Bool) {
         choose.isEnabled = !busy; update.isEnabled = !busy && UserDefaults.standard.data(forKey: "sourceBookmark") != nil; rebuild.isEnabled = !busy

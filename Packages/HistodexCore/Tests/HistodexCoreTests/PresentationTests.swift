@@ -67,4 +67,22 @@ final class PresentationTests: XCTestCase {
         XCTAssertLessThanOrEqual(layout.attributedText.length, 4501)
         XCTAssertLessThanOrEqual(layout.textHeight, 900)
     }
+    @MainActor func testMarkdownTablesSeparateHeaderAndListsIndentWrappedText() {
+        let table = NativeMarkdown.render("| Layer | Purpose |\n| --- | --- |\n| Archive | Preservation |")
+        XCTAssertTrue(table.string.contains("Layer\tPurpose\t\nArchive"))
+        let list = NativeMarkdown.render("- First item with text\n- Second item")
+        let style = list.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertGreaterThan(style?.headIndent ?? 0, style?.firstLineHeadIndent ?? 0)
+        XCTAssertTrue(list.string.contains("•\tFirst item"))
+    }
+    @MainActor func testOutgoingLinksRemainLegibleAndSelectable() {
+        let row = TranscriptEntry.project([item(1, kind: .message, role: "user", text: "See [documentation](https://example.com)")])[0]
+        let layout = TranscriptLayout(entry: row, expanded: false, width: 700, date: nil, highlighted: false)
+        let range = (layout.attributedText.string as NSString).range(of: "documentation")
+        XCTAssertNotEqual(range.location, NSNotFound)
+        XCTAssertEqual(layout.attributedText.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor, .white)
+        XCTAssertNotNil(layout.attributedText.attribute(.link, at: range.location, effectiveRange: nil))
+        XCTAssertNotNil(layout.attributedText.attribute(.underlineStyle, at: range.location, effectiveRange: nil))
+    }
+
 }
