@@ -47,9 +47,16 @@ struct HistoryResolver {
                 }
                 if let parent = matches.last, let boundary = meta.parentEndByte, let ordinal = meta.parentEndOrdinal {
                     let size = (try root.appendingPathComponent(parent.parsePath).resourceValues(forKeys: [.fileSizeKey])).fileSize ?? 0
-                    if boundary <= size {
+                    var validBoundary = boundary == 0
+                    if boundary > 0 && boundary <= size {
+                        let handle = try FileHandle(forReadingFrom: root.appendingPathComponent(parent.parsePath))
+                        defer { try? handle.close() }
+                        try handle.seek(toOffset: UInt64(boundary - 1))
+                        validBoundary = try handle.read(upToCount: 1) == Data([10])
+                    }
+                    if boundary <= size && validBoundary {
                         try visit(parent, endByte: boundary, endOrdinal: ordinal, seen: seen.union([current.id]))
-                    } else { result.warnings.append("Inherited rollout \(reference) is shorter than its declared prefix. Available child history is shown.") }
+                    } else { result.warnings.append("Inherited rollout \(reference) has an unavailable or invalid record boundary. Available child history is shown.") }
                 } else { result.warnings.append("Inherited rollout \(reference) is unavailable or its prefix bounds are invalid. Import its source history to complete this conversation.") }
             }
             result.segments.append(HistorySegment(snapshot: current, endByte: endByte, endOrdinal: endOrdinal))

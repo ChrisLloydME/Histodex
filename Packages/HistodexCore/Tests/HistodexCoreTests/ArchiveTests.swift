@@ -1,6 +1,7 @@
 import XCTest
 import Foundation
 import CryptoKit
+import AppKit
 import libzstd
 @testable import HistodexCore
 
@@ -194,6 +195,109 @@ final class ArchiveTests: XCTestCase, @unchecked Sendable {
         let end = try await store.textPage(itemID: items[1].id, offset: output.count - 13)
         XCTAssertEqual(end, "last sentinel")
         let hits = try await store.search("sentinel"); XCTAssertEqual(hits.count, 1)
+    }
+
+    func testOptionalRealWorldFixtures() async throws {
+        guard let path = ProcessInfo.processInfo.environment["HISTODEX_REAL_FIXTURES"] else { throw XCTSkip("Set HISTODEX_REAL_FIXTURES to a project-local copied source folder.") }
+        let work = try workspace()
+        let store = try ArchiveStore(root: work.appendingPathComponent("archive"))
+        let report = try await store.importDirectory(URL(fileURLWithPath: path))
+        XCTAssertGreaterThan(report.imported, 0)
+        XCTAssertTrue(report.errors.isEmpty, "Real rollout import should have no fatal errors")
+        let conversations = try await store.conversations()
+        XCTAssertFalse(conversations.isEmpty)
+        for conversation in conversations {
+            let items = try await store.items(conversationID: conversation.id)
+            XCTAssertFalse(items.isEmpty)
+            XCTAssertTrue(items.allSatisfy { $0.rawLength > 0 || $0.isDiagnostic })
+        }
+        let reparsed = try await store.reparseArchive()
+        XCTAssertEqual(reparsed.imported, report.imported)
+        XCTAssertTrue(reparsed.errors.isEmpty)
+    }
+
+    func testMirrorAcrossTurnAnnouncementRetainsEventAssets() async throws {
+        let work = try workspace()
+        let event = record("event_msg", ["type": "user_message", "message": "paired text", "local_images": [work.appendingPathComponent("missing.png").path]])
+        _ = try source(work, metadata() + message("paired text") + record("event_msg", ["type": "task_started", "turn_id": "turn-1"]) + event)
+        let store = try ArchiveStore(root: work.appendingPathComponent("archive"))
+        _ = try await store.importDirectory(work.appendingPathComponent("codex"))
+        let items = try await store.items(conversationID: "test-session")
+        let messages = items.filter { $0.kind == .message }
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages.first?.assets.count, 1)
+        XCTAssertNotNil(messages.first?.assets.first?.missingReason)
+    }
+
+    func testOlderChangedRolloutDoesNotReplaceNewerProjection() async throws {
+        let work = try workspace()
+        let file = try source(work, (metadata() + message("newer transcript")).replacingOccurrences(of: "2026-09-06", with: "2026-09-07"))
+        let store = try ArchiveStore(root: work.appendingPathComponent("archive"))
+        _ = try await store.importDirectory(work.appendingPathComponent("codex"))
+        try Data((metadata() + message("older transcript")).utf8).write(to: file)
+        _ = try await store.importDirectory(work.appendingPathComponent("codex"))
+        let current = try await store.search("newer")
+        XCTAssertEqual(current.count, 1)
+        let old = try await store.search("older")
+        XCTAssertEqual(old.count, 0)
+    }
+
+    func testCancelledUpdateKeepsPreviousConversation() async throws {
+        let work = try workspace(); let file = try source(work, metadata() + message("durable baseline"))
+        let store = try ArchiveStore(root: work.appendingPathComponent("archive"))
+        _ = try await store.importDirectory(work.appendingPathComponent("codex"))
+        let big = metadata() + (0..<30000).map { message("interrupted update \($0)") }.joined()
+        try Data(big.utf8).write(to: file)
+        let task = Task { try await store.importDirectory(work.appendingPathComponent("codex")) }
+        try await Task.sleep(for: .milliseconds(100))
+        task.cancel()
+        do { _ = try await task.value; XCTFail("Long import should be canceled") } catch is CancellationError {}
+        let hits = try await store.search("baseline"); XCTAssertEqual(hits.count, 1)
+        let interrupted = try await store.search("interrupted"); XCTAssertTrue(interrupted.isEmpty)
+    }
+
+    func testReparseUsesOriginalArchivedAssetEvenIfExternalFileChanges() async throws {
+        let work = try workspace()
+        let local = work.appendingPathComponent("asset.png"); try Data([1,2,3]).write(to: local)
+        _ = try source(work, metadata() + record("response_item", ["type": "message", "role": "user", "content": [["type": "input_image", "image_url": local.path]]]))
+        let store = try ArchiveStore(root: work.appendingPathComponent("archive"))
+        _ = try await store.importDirectory(work.appendingPathComponent("codex"))
+        let before = try await store.items(conversationID: "test-session")
+        try Data([4,5,6]).write(to: local)
+        _ = try await store.reparseArchive()
+        let after = try await store.items(conversationID: "test-session")
+        XCTAssertEqual(before[1].assets[0].hash, after[1].assets[0].hash)
+    }
+
+    func testInheritedCycleShowsNoticeAndKeepsChild() async throws {
+        let work = try workspace(); let id = "11111111-1111-1111-1111-111111111111"
+        let meta = record("session_meta", ["id": id, "history_base": ["thread_id": id, "end_byte_offset": 0, "end_ordinal_exclusive": 0]])
+        let file = try source(work, meta + message("child survives cycle"))
+        try FileManager.default.moveItem(at: file, to: file.deletingLastPathComponent().appendingPathComponent("rollout-cycle-" + id + ".jsonl"))
+        let store = try ArchiveStore(root: work.appendingPathComponent("archive"))
+        _ = try await store.importDirectory(work.appendingPathComponent("codex"))
+        let items = try await store.items(conversationID: id)
+        XCTAssertTrue(items.contains { $0.text == "child survives cycle" })
+        XCTAssertTrue(items.contains { $0.isDiagnostic && $0.text.contains("cycle") })
+    }
+
+    func testSourceOpenRejectsSymlinkReplacement() throws {
+        let work = try workspace(); let file = try source(work, metadata())
+        let source = try CodexSource(root: work.appendingPathComponent("codex")); let discovered = try source.discover()
+        let other = work.appendingPathComponent("outside.jsonl"); try Data(metadata("outside").utf8).write(to: other)
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.createSymbolicLink(at: file, withDestinationURL: other)
+        XCTAssertThrowsError(try SnapshotStore(root: work.appendingPathComponent("archive")).snapshot(source: source, file: discovered[0]))
+    }
+
+    @MainActor func testNativeMarkdownKeepsTextAndRejectsActiveLinks() {
+        let result = NativeMarkdown.render("# Heading\n\n**Bold** and `code` with [safe](https://example.com) and [unsafe](javascript:alert(1)).\n\n```swift\nlet value = 1\n```")
+        XCTAssertTrue(result.string.contains("Heading")); XCTAssertTrue(result.string.contains("let value = 1"))
+        var links: [String] = []
+        result.enumerateAttribute(.link, in: NSRange(location: 0, length: result.length)) { value, _, _ in
+            if let url = value as? URL { links.append(url.absoluteString) }
+        }
+        XCTAssertEqual(links, ["https://example.com"])
     }
 
 }

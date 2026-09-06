@@ -12,7 +12,7 @@ struct SessionMetadata {
 }
 
 struct CodexAdapter {
-    static let version = 1
+    static let version = 2
     var metadata = SessionMetadata()
     var turnID = ""
 

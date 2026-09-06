@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import libzstd
+import Darwin
 
 public struct SourceFile: Sendable {
     public let url: URL
@@ -22,6 +23,7 @@ public struct CodexSource: Sendable {
         var files: [SourceFile] = []
         for directory in ["sessions", "archived_sessions"] {
             let base = root.appendingPathComponent(directory)
+            if (try? base.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true { continue }
             guard let e = fm.enumerator(at: base, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles]) else { continue }
             for case let url as URL in e {
                 let v = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
@@ -40,7 +42,14 @@ public struct CodexSource: Sendable {
         guard file.url.resolvingSymlinksInPath().path.hasPrefix(root.path + "/") else {
             throw ArchiveError.invalidSource("Source path escaped the selected folder.")
         }
-        return try FileHandle(forReadingFrom: file.url)
+        let descriptor = Darwin.open(file.url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0, (metadata.st_mode & S_IFMT) == S_IFREG else {
+            Darwin.close(descriptor)
+            throw ArchiveError.invalidSource("Rollout source is not a regular file.")
+        }
+        return FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     }
 }
 

@@ -2,6 +2,7 @@
 set -eu
 cd "${0:A:h:h}"
 mkdir -p .tmp/cache/clang .tmp/swift-config .tmp/swift-security .tmp/tmp
+export LLVM_PROFILE_FILE="$PWD/.tmp/build/core-%p.profraw"
 export TMPDIR="$PWD/.tmp/tmp"
 export CLANG_MODULE_CACHE_PATH="$PWD/.tmp/cache/clang"
 export SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.tmp/cache/clang"

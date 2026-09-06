@@ -7,6 +7,8 @@ import Markdown
 struct AssetStore {
     let root: URL
     let sourceRoot: URL
+    var preserved: [String: ArchivedAsset] = [:]
+    var archiveOnly = false
 
     func extract(from value: JSONValue, cwd: String) -> [ArchivedAsset] {
         var references: [String] = []
@@ -17,8 +19,8 @@ struct AssetStore {
                 let type = object["type"]?.string ?? ""
                 for (key, child) in object {
                     let s = child.string
-                    if s.hasPrefix("data:image/") { add(s) }
-                    else if ["image_url", "saved_path", "image_path", "local_image_path"].contains(key) { add(s) }
+                    if s.hasPrefix("data:image/") || s.hasPrefix("data:audio/") || s.hasPrefix("data:application/pdf;") { add(s) }
+                    else if ["image_url", "audio_url", "saved_path", "image_path", "local_image_path", "local_audio"].contains(key) { add(s) }
                     else if ["images", "local_images"].contains(key) { child.array.forEach { add($0.string) } }
                     else if key == "result", type == "image_generation_call" || type == "image_generation_end" {
                         if s.hasPrefix("/") || s.hasPrefix("file:") { add(s) }
@@ -36,6 +38,9 @@ struct AssetStore {
                     }
                     if key == "output" || key == "arguments" || key == "input", let data = s.data(using: .utf8),
                        let nested = try? JSONDecoder().decode(JSONValue.self, from: data) { walk(nested) }
+                    if ["arguments", "input"].contains(key), object["name"]?.string.contains("view_image") == true,
+                       let d = s.data(using: .utf8), let args = try? JSONDecoder().decode(JSONValue.self, from: d) { add(args["path"].string) }
+                    if key == "referenced_image_paths" { child.array.forEach { add($0.string) } }
                     if case .object = child { walk(child) }
                     if case .array = child { walk(child) }
                 }
@@ -53,6 +58,9 @@ struct AssetStore {
         func missing(_ reason: String) -> ArchivedAsset {
             ArchivedAsset(hash: nil, relativePath: nil, mimeType: "", byteSize: 0, width: nil, height: nil, sourceReference: sourceLabel, missingReason: reason)
         }
+        if !isInline, let saved = preserved[reference], let path = saved.relativePath,
+           FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path) { return saved }
+        if !isInline && archiveOnly { return missing("External asset was not available in the archive. Re-import the source to try copying it.") }
         let fm = FileManager.default
         let temp = root.appendingPathComponent("staging/asset-\(UUID().uuidString)")
         defer { try? fm.removeItem(at: temp) }
@@ -77,7 +85,7 @@ struct AssetStore {
                 fm.createFile(atPath: temp.path, contents: nil)
                 let output = try FileHandle(forWritingTo: temp); defer { try? output.close() }
                 // Size boundary also prevents following a continuously growing asset forever.
-                var remaining = try input.seekToEnd(); try input.seek(toOffset: 0)
+                var remaining = try input.seekToEnd(); guard remaining <= 256 * 1024 * 1024 else { return missing("Asset exceeds the 256 MiB import limit.") }; try input.seek(toOffset: 0)
                 while remaining > 0 {
                     let data = try input.read(upToCount: Int(min(remaining, 128 * 1024))) ?? Data()
                     guard !data.isEmpty else { throw ArchiveError.truncatedSource }
@@ -107,7 +115,7 @@ extension JSONValue {
     /// The original bytes live once in raw storage. Never index embedded image bodies.
     var withoutImageBodies: JSONValue {
         switch self {
-        case .string(let s): return s.hasPrefix("data:image/") ? .string("[Archived image]") : self
+        case .string(let s): return s.hasPrefix("data:") && s.contains(";base64,") ? .string("[Archived asset]") : self
         case .array(let a): return .array(a.map(\.withoutImageBodies))
         case .object(let o):
             var result = o.mapValues(\.withoutImageBodies)

@@ -5,7 +5,7 @@ import GRDB
 public actor ArchiveStore {
     public nonisolated let root: URL
     private let database: DatabaseQueue
-    public static let schemaVersion = 1
+    public static let schemaVersion = 2
 
     public init(root: URL) throws {
         self.root = root.standardizedFileURL.resolvingSymlinksInPath()
@@ -37,6 +37,7 @@ public actor ArchiveStore {
                     isDiagnostic INTEGER NOT NULL, mirrorKey TEXT, mirrorFamily TEXT, hidden INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX item_order ON items(conversationID, ordinal);
+                CREATE INDEX item_calls ON items(conversationID, callID);
                 CREATE INDEX item_mirrors ON items(conversationID, mirrorKey, mirrorFamily, hidden);
                 CREATE INDEX conversation_date ON conversations(updatedAt DESC);
                 CREATE TABLE assets (
@@ -57,6 +58,13 @@ public actor ArchiveStore {
                     INSERT INTO item_search(item_search,rowid,text,toolName) VALUES('delete',old.id,old.text,old.toolName);
                 END;
                 CREATE TABLE reading_positions(conversationID TEXT PRIMARY KEY, ordinal INTEGER NOT NULL);
+                """)
+        }
+        migrator.registerMigration("archive-v2") { db in
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS item_calls ON items(conversationID, callID);
+                CREATE TABLE snapshot_sources(snapshotID TEXT NOT NULL REFERENCES snapshots(id), sourcePath TEXT NOT NULL, PRIMARY KEY(snapshotID,sourcePath));
+                INSERT INTO snapshot_sources SELECT id,sourcePath FROM snapshots;
                 """)
         }
         try migrator.migrate(database)
@@ -121,6 +129,7 @@ public actor ArchiveStore {
             throw ArchiveError.invalidSource("The archive and source folder must be separate, non-nested locations.")
         }
         let files = try source.discover()
+        guard !files.isEmpty else { throw ArchiveError.invalidSource("No rollout files were found under sessions/ or archived_sessions/ in the selected folder.") }
         let snapshots = try SnapshotStore(root: root)
         var report = ImportReport()
         var captured: [Snapshot] = []
@@ -131,6 +140,7 @@ public actor ArchiveStore {
             catch is CancellationError { throw CancellationError() }
             catch { report.errors.append("\(file.relativePath): \(error.localizedDescription)") }
         }
+        for snapshot in captured { try register(snapshot) }
         let known = try knownSnapshots() + captured
         for (index, snapshot) in captured.enumerated() {
             try Task.checkCancellation()
@@ -163,9 +173,19 @@ public actor ArchiveStore {
 
     private func knownSnapshots() throws -> [Snapshot] {
         try database.read { db in
-            try Row.fetchAll(db, sql: "SELECT * FROM snapshots ORDER BY importedAt").map {
+            try Row.fetchAll(db, sql: "SELECT s.id,s.rawPath,s.parsePath,ss.sourcePath,s.byteSize FROM snapshots s JOIN snapshot_sources ss ON ss.snapshotID=s.id ORDER BY s.importedAt").map {
                 Snapshot(id: $0["id"], rawPath: $0["rawPath"], parsePath: $0["parsePath"], byteSize: UInt64($0["byteSize"] as Int64), sourcePath: $0["sourcePath"])
             }
+        }
+    }
+
+    private func register(_ snapshot: Snapshot) throws {
+        try database.write { db in
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO snapshots(id,rawPath,parsePath,sourcePath,byteSize,importedAt,parserVersion,status)
+                VALUES(?,?,?,?,?,?,?,'pending')
+                """, arguments: [snapshot.id, snapshot.rawPath, snapshot.parsePath, snapshot.sourcePath, Int64(snapshot.byteSize), ISO8601DateFormatter().string(from: Date()), CodexAdapter.version])
+            try db.execute(sql: "INSERT OR IGNORE INTO snapshot_sources VALUES(?,?)", arguments: [snapshot.id, snapshot.sourcePath])
         }
     }
 
@@ -173,7 +193,7 @@ public actor ArchiveStore {
         let resolver = HistoryResolver(root: root, snapshots: known)
         let metadata = try resolver.metadata(snapshot)
         if !force, metadata.parentRolloutID.isEmpty, try database.read({ db in
-            try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM snapshots WHERE id=? AND parserVersion=? AND status='complete')", arguments: [snapshot.id, CodexAdapter.version]) ?? false
+            try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM snapshots WHERE id=? AND parserVersion=? AND status IN ('complete','superseded'))", arguments: [snapshot.id, CodexAdapter.version]) ?? false
         }) { return false }
         let plan = try resolver.plan(for: snapshot)
         let identity = metadata.sourceID.isEmpty ? SHA256.hash(data: Data(snapshot.sourcePath.utf8)).map { String(format: "%02x", $0) }.joined() : metadata.sourceID
@@ -185,6 +205,7 @@ public actor ArchiveStore {
         }
         do {
             try database.write { db in
+                let currentDate = try String.fetchOne(db, sql: "SELECT updatedAt FROM conversations WHERE id=?", arguments: [identity]) ?? ""
                 // Retain known asset links before replacing normalized rows. Reparsing stays self-contained.
                 let existingAssets = try Row.fetchAll(db, sql: """
                     SELECT ia.sourceReference,ia.missingReason,a.* FROM item_assets ia
@@ -200,9 +221,11 @@ public actor ArchiveStore {
                 try db.execute(sql: "DELETE FROM items WHERE conversationID=?", arguments: [identity])
                 var adapter = CodexAdapter(); adapter.metadata = metadata
                 var count = 0; var warnings = 0
-                let assetStore = AssetStore(root: root, sourceRoot: sourceRoot)
+                let assetStore = AssetStore(root: root, sourceRoot: sourceRoot, preserved: preserved, archiveOnly: force)
                 enum PrefixEnd: Error { case reached }
                 for segment in plan.segments {
+                    let segmentMetadata = try resolver.metadata(segment.snapshot)
+                    if !segmentMetadata.project.isEmpty { adapter.metadata.project = segmentMetadata.project }
                     do {
                         try JSONLReader().read(root.appendingPathComponent(segment.snapshot.parsePath)) { line in
                             if let end = segment.endByte, line.offset + line.length > end { throw PrefixEnd.reached }
@@ -230,28 +253,52 @@ public actor ArchiveStore {
                 }
                 let visible = try Int.fetchOne(db, sql: "SELECT count(*) FROM items WHERE conversationID=? AND hidden=0", arguments: [identity]) ?? count
                 let meta = adapter.metadata
+                if !force && !currentDate.isEmpty && !meta.updatedAt.isEmpty && meta.updatedAt < currentDate { throw ProjectionOutcome.older }
                 try db.execute(sql: """
                     UPDATE conversations SET title=?,project=?,startedAt=?,updatedAt=?,itemCount=?,warningCount=?,snapshotID=? WHERE id=?
                     """, arguments: [meta.title.isEmpty ? "Untitled conversation" : meta.title, meta.project, meta.startedAt, meta.updatedAt, visible, warnings, snapshot.id, identity])
                 try db.execute(sql: "UPDATE snapshots SET status='complete',parserVersion=?,error=NULL WHERE id=?", arguments: [CodexAdapter.version, snapshot.id])
             }
             return true
+        } catch ProjectionOutcome.older {
+            try database.write { db in try db.execute(sql: "UPDATE snapshots SET status='superseded',parserVersion=?,error=NULL WHERE id=?", arguments: [CodexAdapter.version, snapshot.id]) }
+            return false
         } catch {
             try? database.write { db in try db.execute(sql: "UPDATE snapshots SET status='failed',error=? WHERE id=?", arguments: [error.localizedDescription, snapshot.id]) }
             throw error
         }
     }
 
-    private static func insert(_ item: ArchiveItem, db: Database) throws {
+    private enum ProjectionOutcome: Error { case older }
+
+    private static func insert(_ original: ArchiveItem, db: Database) throws {
+        var item = original
+        if item.kind == .toolResult, !item.callID.isEmpty,
+           let call = try Row.fetchOne(db, sql: "SELECT kind,toolName FROM items WHERE conversationID=? AND callID=? AND kind IN ('command','toolCall','fileChange') ORDER BY ordinal DESC LIMIT 1", arguments: [item.conversationID, item.callID]) {
+            item.toolName = call["toolName"]
+            if call["kind"] as String == ItemKind.command.rawValue { item.kind = .commandOutput }
+        }
         var mirrorKey: String?; var family: String?; var hidden = false
         if item.kind == .message || item.kind == .reasoning {
             family = item.sourceType.hasPrefix("response_item/") ? "response" : "event"
-            let signature = item.turnID + "\u{0}" + item.kind.rawValue + "\u{0}" + item.role + "\u{0}" + item.text
+            let signature = item.kind.rawValue + "\u{0}" + item.role + "\u{0}" + item.text
             mirrorKey = SHA256.hash(data: Data(signature.utf8)).map { String(format: "%02x", $0) }.joined()
             // Pair only the most recent opposite representation, once. Repeated messages in the same family remain.
-            if let prior = try Row.fetchOne(db, sql: "SELECT id,mirrorFamily FROM items WHERE conversationID=? AND mirrorKey=? AND hidden=0 ORDER BY id DESC LIMIT 1", arguments: [item.conversationID, mirrorKey]),
+            if let prior = try Row.fetchOne(db, sql: "SELECT id,mirrorFamily FROM items WHERE conversationID=? AND mirrorKey=? AND hidden=0 AND ordinal>=? AND (turnID=? OR turnID='' OR ?='') ORDER BY id DESC LIMIT 1", arguments: [item.conversationID, mirrorKey, max(0, item.ordinal - 32), item.turnID, item.turnID]),
                prior["mirrorFamily"] as String? != family {
                 // Mark the pair as consumed by clearing its key; keep the richer response representation.
+                let priorID: Int64 = prior["id"]
+                if family == "response" {
+                    let assets = try Row.fetchAll(db, sql: "SELECT ia.sourceReference,ia.missingReason,a.* FROM item_assets ia LEFT JOIN assets a ON a.hash=ia.hash WHERE ia.itemID=? ORDER BY ia.position", arguments: [priorID]).map(Self.asset)
+                    for asset in assets where !item.assets.contains(where: { asset.hash != nil ? $0.hash == asset.hash : $0.sourceReference == asset.sourceReference }) { item.assets.append(asset) }
+                } else {
+                    var position = try Int.fetchOne(db, sql: "SELECT count(*) FROM item_assets WHERE itemID=?", arguments: [priorID]) ?? 0
+                    for asset in item.assets {
+                        if let hash = asset.hash { try db.execute(sql: "INSERT OR IGNORE INTO assets VALUES(?,?,?,?,?,?)", arguments: [hash,asset.relativePath,asset.mimeType,asset.byteSize,asset.width,asset.height]) }
+                        let exists = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM item_assets WHERE itemID=? AND (hash=? OR sourceReference=?))", arguments: [priorID,asset.hash,asset.sourceReference]) ?? false
+                        if !exists { try db.execute(sql: "INSERT INTO item_assets VALUES(?,?,?,?,?)", arguments: [priorID,position,asset.hash,asset.sourceReference,asset.missingReason]); position += 1 }
+                    }
+                }
                 if family == "response" { try db.execute(sql: "UPDATE items SET hidden=1,mirrorKey=NULL WHERE id=?", arguments: [prior["id"] as Int64]) }
                 else { hidden = true; try db.execute(sql: "UPDATE items SET mirrorKey=NULL WHERE id=?", arguments: [prior["id"] as Int64]) }
                 mirrorKey = nil
