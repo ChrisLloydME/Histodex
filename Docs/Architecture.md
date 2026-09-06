@@ -45,3 +45,7 @@ AppKit NSWindowController/NSSplitViewController, sidebar NSTableView and reusabl
 ## Risks to validate
 
 Huge individual JSON records, concurrent source rewrites (prefix snapshots guarantee a size boundary, not atomicity against arbitrary in-place edits), inherited/reverted history, event mirrors, inaccessible image paths outside a security grant, encrypted reasoning, evolving tool payloads, unsupported inline media, FTS size, native variable-height text layout, sandbox signing/test environment. Reparse support must use owned snapshots, including assets already imported. Do not claim full compatibility with unseen future schemas.
+
+## Implemented refinements
+
+Archive schema v2 adds persistent source aliases for content-deduplicated snapshots and an indexed call/result lookup. Adapter v2 links command outputs, retains assets from event/response mirrors, and keeps reparsing on owned assets. Prefix resolution uses owned snapshots with cycle and byte-boundary validation; unavailable ancestry produces visible notices. Newer conversation projections are protected from older changed rollouts. Database query previews are capped independently from stored/indexed text, and the native inspector pages through complete output. See Validation.md for tested boundaries and release limitations.

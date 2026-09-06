@@ -26,6 +26,7 @@ final class ArchiveBrowserController: NSViewController, NSTableViewDataSource, N
     private var generation = UUID()
     private var searchGeneration = UUID()
     private var importing: Task<Void, Never>?
+    private var lastImportSummary = ""
     private var detailWindows: [NSWindowController] = []
     private var showingSearch: Bool { scope.selectedSegment == 1 && !search.stringValue.isEmpty }
 
@@ -102,8 +103,12 @@ final class ArchiveBrowserController: NSViewController, NSTableViewDataSource, N
                 conversations = list; hits = results; sidebar.reloadData()
                 if searching && hits.isEmpty { status.stringValue = "No matching archived content" }
                 else if searching { status.stringValue = "\(hits.count) results · Select one to jump to its exact item" }
-                else { status.stringValue = "\(list.count) archived conversations · Offline" }
-                if let current = selected, let updated = list.first(where: { $0.id == current.id }) { selected = updated }
+                else { status.stringValue = lastImportSummary.isEmpty ? "\(list.count) archived conversations · Offline" : lastImportSummary }
+                if let current = selected, let updated = list.first(where: { $0.id == current.id }) {
+                    selected = updated
+                    titleLabel.stringValue = updated.title
+                    subtitle.stringValue = "\(updated.project) · \(updated.startedAt.prefix(10)) · \(updated.itemCount) archived items" + (updated.warningCount > 0 ? " · \(updated.warningCount) import notices" : "")
+                }
             } catch { show(error) }
         }
     }
@@ -243,8 +248,9 @@ final class ArchiveBrowserController: NSViewController, NSTableViewDataSource, N
     @objc private func cancelImport() { importing?.cancel() }
     private func setImporting(_ busy: Bool) { importButton.isEnabled = !busy; refreshButton.isEnabled = !busy && UserDefaults.standard.data(forKey: "sourceBookmark") != nil; cancel.isHidden = !busy }
     private func finish(_ report: ImportReport) {
-        reloadSidebar()
         let message = "\(report.imported) imported · \(report.unchanged) unchanged · \(report.errors.count) failed"
+        lastImportSummary = message
+        reloadSidebar()
         status.stringValue = message
         if !report.errors.isEmpty {
             let alert = NSAlert(); alert.messageText = "Import completed with errors"; alert.informativeText = message + "\n\n" + report.errors.prefix(12).joined(separator: "\n"); alert.runModal()
