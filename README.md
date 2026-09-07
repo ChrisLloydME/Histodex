@@ -6,6 +6,10 @@
 
 A native, offline macOS archive for Codex conversation history. **Codex is an import format. Histodex is the archive.**
 
+> [!CAUTION]
+>
+> Histodex is still in early development. Some license-related materials, including acknowledgements, may currently be missing. These will be added after the core functionality is complete.
+
 ## Use
 
 Open `Histodex.xcodeproj` in Xcode 16 or newer with Swift 6 support, select the Histodex scheme, and run on macOS 14 or newer. Dependencies are pinned; the first build needs internet access. The application does not.
