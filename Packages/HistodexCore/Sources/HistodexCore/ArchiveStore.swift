@@ -5,7 +5,7 @@ import GRDB
 public actor ArchiveStore {
     public nonisolated let root: URL
     private let database: DatabaseQueue
-    public static let schemaVersion = 5
+    public static let schemaVersion = 6
 
     public init(root: URL) throws {
         self.root = root.standardizedFileURL.resolvingSymlinksInPath()
@@ -94,13 +94,16 @@ public actor ArchiveStore {
                 CREATE INDEX source_revision_snapshot ON source_revisions(snapshotID,sourcePath);
                 """)
         }
+        migrator.registerMigration("archive-v6") { db in
+            try db.execute(sql: "ALTER TABLE conversations ADD COLUMN isUserVisible INTEGER NOT NULL DEFAULT 1; ALTER TABLE state_names ADD COLUMN displayName TEXT")
+        }
         try migrator.migrate(database)
     }
 
     public func conversations(filter: String = "") throws -> [Conversation] {
         try database.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT conversations.*, coalesce((SELECT substr(text,1,180) FROM items WHERE conversationID=conversations.id AND hidden=0 AND category='conversation' AND kind='message' AND role IN ('user','assistant') ORDER BY ordinal DESC LIMIT 1),'') AS preview FROM conversations WHERE ? = '' OR instr(lower(title || ' ' || project || ' ' || startedAt), lower(?)) > 0
+                SELECT conversations.*, coalesce((SELECT substr(text,1,180) FROM items WHERE conversationID=conversations.id AND hidden=0 AND category='conversation' AND kind='message' AND role IN ('user','assistant') ORDER BY ordinal DESC LIMIT 1),'') AS preview FROM conversations WHERE isUserVisible=1 AND (? = '' OR instr(lower(title || ' ' || project || ' ' || startedAt), lower(?)) > 0)
                 ORDER BY updatedAt DESC, id LIMIT 10000
                 """, arguments: [filter, filter])
             return rows.map(Self.conversation)
@@ -135,7 +138,7 @@ public actor ArchiveStore {
             try Row.fetchAll(db, sql: """
                 SELECT i.id,i.conversationID,i.ordinal,c.title,snippet(item_search,0,'','', ' … ',24) AS excerpt
                 FROM item_search JOIN items i ON i.id=item_search.rowid JOIN conversations c ON c.id=i.conversationID
-                WHERE item_search MATCH ? AND i.hidden=0 AND \(scope.predicate) ORDER BY rank LIMIT ?
+                WHERE item_search MATCH ? AND c.isUserVisible=1 AND i.hidden=0 AND \(scope.predicate) ORDER BY rank LIMIT ?
                 """, arguments: [pattern, min(500, max(1, limit))]).map {
                     SearchHit(id: $0["id"], conversationID: $0["conversationID"], title: $0["title"], ordinal: $0["ordinal"], snippet: $0["excerpt"])
                 }
@@ -167,7 +170,7 @@ public actor ArchiveStore {
         do {
             let names = try CodexStateTitles.read(source: source, archiveRoot: root)
             try database.write { db in
-                for name in names { try db.execute(sql: "INSERT OR REPLACE INTO state_names VALUES(?,?,?,?,?)", arguments: [name.id, name.path, name.title, name.rawPath, source.root.path]) }
+                for name in names { try db.execute(sql: "INSERT OR REPLACE INTO state_names VALUES(?,?,?,?,?,?)", arguments: [name.id, name.path, name.title, name.rawPath, source.root.path, name.displayName]) }
             }
         } catch is CancellationError { throw CancellationError() }
         catch { report.errors.append("Session titles: \(error.localizedDescription)") }
@@ -266,10 +269,12 @@ public actor ArchiveStore {
 
     private func applyNames() throws {
         try database.write { db in
-            // Agent Sessions precedence: explicit index name, state title/first
-            // user message, then the rollout-derived title. Match state by ID first.
+            // Current Codex display names precede the legacy index/title fallback
+            // used by Agent Sessions. The state title may be the full first prompt.
             try db.execute(sql: """
                 UPDATE conversations SET title = coalesce(
+                    (SELECT displayName FROM state_names WHERE id=conversations.id),
+                    (SELECT n.displayName FROM state_names n JOIN source_revisions sr ON sr.sourcePath=n.sourcePath AND sr.sourceRoot=n.sourceRoot WHERE sr.snapshotID=conversations.snapshotID AND n.displayName IS NOT NULL LIMIT 1),
                     (SELECT title FROM conversation_names WHERE id=conversations.id),
                     (SELECT title FROM state_names WHERE id=conversations.id),
                     (SELECT n.title FROM state_names n JOIN source_revisions sr ON sr.sourcePath=n.sourcePath AND sr.sourceRoot=n.sourceRoot WHERE sr.snapshotID=conversations.snapshotID ORDER BY n.id LIMIT 1),
@@ -389,8 +394,8 @@ public actor ArchiveStore {
                 let meta = adapter.metadata
                 if !force && !currentDate.isEmpty && !meta.updatedAt.isEmpty && meta.updatedAt < currentDate { throw ProjectionOutcome.older }
                 try db.execute(sql: """
-                    UPDATE conversations SET title=?,baseTitle=?,titleUpdatedAt=?,project=?,startedAt=?,updatedAt=?,itemCount=?,warningCount=?,snapshotID=? WHERE id=?
-                    """, arguments: [meta.title.isEmpty ? "Conversation " + String(identity.prefix(8)) : meta.title, meta.title.isEmpty ? "Conversation " + String(identity.prefix(8)) : meta.title, meta.titleUpdatedAt, meta.project, meta.startedAt, meta.updatedAt, visible, warnings, snapshot.id, identity])
+                    UPDATE conversations SET title=?,baseTitle=?,titleUpdatedAt=?,project=?,startedAt=?,updatedAt=?,itemCount=?,warningCount=?,snapshotID=?,isUserVisible=? WHERE id=?
+                    """, arguments: [meta.title.isEmpty ? "Conversation " + String(identity.prefix(8)) : meta.title, meta.title.isEmpty ? "Conversation " + String(identity.prefix(8)) : meta.title, meta.titleUpdatedAt, meta.project, meta.startedAt, meta.updatedAt, visible, warnings, snapshot.id, meta.isUserVisible, identity])
                 try db.execute(sql: "UPDATE snapshots SET status='complete',parserVersion=?,error=NULL WHERE id=?", arguments: [CodexAdapter.version, snapshot.id])
             }
             return true

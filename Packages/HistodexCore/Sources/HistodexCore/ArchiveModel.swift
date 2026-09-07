@@ -81,9 +81,7 @@ public struct ImportProgress: Sendable {
         return min(1, (Double(completed) + fileFraction) / Double(total))
     }
     public var description: String {
-        let count = total > 0 ? " · \(min(completed + 1, total)) of \(total)" : ""
-        let bytes = totalBytes > 0 ? " · \(ByteCountFormatter.string(fromByteCount: processedBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file))" : ""
-        return phase + count + bytes + (filename.isEmpty ? "" : "\n" + URL(fileURLWithPath: filename).lastPathComponent)
+        phase + (fraction.map { " · \(Int($0 * 100))%" } ?? "")
     }
 }
 

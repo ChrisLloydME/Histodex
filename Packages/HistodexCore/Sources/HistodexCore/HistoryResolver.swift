@@ -21,6 +21,7 @@ struct HistoryResolver {
             try JSONLReader().read(root.appendingPathComponent(snapshot.parsePath)) { line in
                 guard let d = line.data, let raw = try? JSONDecoder().decode(JSONValue.self, from: d), raw["type"].string == "session_meta" else { return }
                 let p = raw["payload"]
+                result.isUserVisible = CodexAdapter.isUserVisible(p)
                 result.sourceID = p["id"].string; result.project = p["cwd"].string; result.startedAt = p["timestamp"].string
                 result.parentRolloutID = p["history_base"]["thread_id"].string
                 result.parentEndByte = p["history_base"]["end_byte_offset"].integer

@@ -2,6 +2,7 @@ import Foundation
 
 struct SessionMetadata {
     var sourceID = ""
+    var isUserVisible = true
     var title = ""
     var titleUpdatedAt = ""
     var hasExplicitTitle = false
@@ -14,7 +15,7 @@ struct SessionMetadata {
 }
 
 struct CodexAdapter {
-    static let version = 5
+    static let version = 6
     var metadata = SessionMetadata()
     var turnID = ""
     var acceptsTitle = true
@@ -22,6 +23,13 @@ struct CodexAdapter {
     private var titles = CodexTitleCandidates()
     var recordThreadID = ""
     private var ownsTitle: Bool { acceptsTitle && (recordThreadID.isEmpty || recordThreadID == metadata.sourceID) }
+
+    static func isUserVisible(_ metadata: JSONValue) -> Bool {
+        let provenance = metadata["thread_source"].string
+        if !provenance.isEmpty { return provenance == "user" }
+        if case .object(let source) = metadata["source"], source["subagent"] != nil { return false }
+        return true
+    }
 
     mutating func normalize(_ line: RawLine, rawPath: String, assetStore: AssetStore) -> ArchiveItem {
         var item = ArchiveItem()
@@ -35,8 +43,23 @@ struct CodexAdapter {
             item.sourceType = "malformed"; item.isDiagnostic = true; return item
         }
         var type = raw["type"].string
-        let p: JSONValue
+        var p: JSONValue
         if case .object = raw["payload"] { p = raw["payload"] } else { p = raw }
+        // Current desktop records carry provenance for each content block. Role
+        // alone describes model input, not whether the user authored that input.
+        let kinds = p["internal_chat_message_metadata_passthrough"]["content_item_kinds"].array
+        var injected: JSONValue?
+        if p["role"].string == "user", !kinds.isEmpty, case .object(var fields) = p {
+            let blocks = p["content"].array
+            let visible = blocks.enumerated().filter { index, _ in
+                index < kinds.count && kinds[index].string.hasPrefix("user.")
+            }.map(\.element)
+            let context = blocks.enumerated().filter { index, _ in
+                index >= kinds.count || !kinds[index].string.hasPrefix("user.")
+            }.map(\.element)
+            if !context.isEmpty { var copy = fields; copy["content"] = .array(context); injected = .object(copy) }
+            if !visible.isEmpty { fields["content"] = .array(visible); p = .object(fields) }
+        }
         var subtype = p["type"].string
         // Older Codex/OpenAI sessions use top-level messages and tool records.
         if case .null = raw["payload"] {
@@ -81,6 +104,7 @@ struct CodexAdapter {
         case "session_meta":
             recordThreadID = p["id"].string
             if metadata.sourceID.isEmpty {
+                metadata.isUserVisible = Self.isUserVisible(p)
                 metadata.sourceID = p["id"].string; metadata.project = p["cwd"].string
                 metadata.startedAt = p["timestamp"].string.isEmpty ? item.timestamp : p["timestamp"].string
                 metadata.parentRolloutID = p["history_base"]["thread_id"].string
@@ -158,10 +182,15 @@ struct CodexAdapter {
             if item.role == "assistant", item.channel == "analysis" { item.kind = .reasoning; item.category = .activity }
             if item.role == "assistant", !p["recipient"].string.isEmpty, p["recipient"].string != "all" { item.category = .activity }
             if item.role == "user" {
+                let explicitlyAuthored = !kinds.isEmpty && kinds.contains { $0.string.hasPrefix("user.") }
+                if let injected {
+                    if explicitlyAuthored { item.contextText = CodexContent.message(injected).text }
+                    else { item.category = .context }
+                }
                 let split = ConversationSemantics.separateContext(item.text)
                 if ["environment_context", "environment-context", "env_context"].contains(p["kind"].string) {
                     item.category = .context
-                } else if !split.context.isEmpty {
+                } else if kinds.isEmpty, !split.context.isEmpty {
                     if split.message.isEmpty { item.category = .context }
                     else { item.contextText = split.context; item.text = split.message }
                 }

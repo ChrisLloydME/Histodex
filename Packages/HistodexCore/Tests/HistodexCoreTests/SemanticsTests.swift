@@ -132,7 +132,8 @@ extension ArchiveTests {
                 DELETE FROM grdb_migrations WHERE identifier='archive-v4';
                 DROP TABLE source_revisions;
                 DROP TABLE state_names;
-                DELETE FROM grdb_migrations WHERE identifier='archive-v5';
+                ALTER TABLE conversations DROP COLUMN isUserVisible;
+                DELETE FROM grdb_migrations WHERE identifier IN ('archive-v5','archive-v6');
                 DELETE FROM grdb_migrations WHERE identifier='archive-v3';
                 """)
         }
