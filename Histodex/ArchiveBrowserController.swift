@@ -32,6 +32,7 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
     private var lastWidth: CGFloat = 0
     private var detailWindows: [NSWindowController] = []
     private var infoItem: NSToolbarItem?
+    private let conversationHeading = NSTextField(labelWithString: "Histodex")
 
     init(store: ArchiveStore, scope: ArchiveScope = .conversation) { self.store = store; self.scope = scope; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("Use init(store:)") }
@@ -40,7 +41,7 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
         splitView.dividerStyle = .thin; splitView.autosaveName = "ConversationSplit"
         let left = NSViewController(); let material = NSVisualEffectView(); material.material = .sidebar; material.blendingMode = .behindWindow; left.view = material
         let right = NSViewController(); right.view = NSView(); right.view.wantsLayer = true
-        let sidebarItem = NSSplitViewItem(sidebarWithViewController: left); sidebarItem.minimumThickness = 250; sidebarItem.maximumThickness = 380; sidebarItem.preferredThicknessFraction = 0.28; sidebarItem.canCollapse = true
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: left); sidebarItem.minimumThickness = 250; sidebarItem.maximumThickness = 380; sidebarItem.preferredThicknessFraction = 0.28; sidebarItem.canCollapse = false
         addSplitViewItem(sidebarItem)
         let contentItem = NSSplitViewItem(viewController: right); contentItem.minimumThickness = 480; addSplitViewItem(contentItem)
 
@@ -49,7 +50,7 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
         let sidebarScroll = NSScrollView(); sidebarScroll.documentView = sidebar; sidebarScroll.hasVerticalScroller = true; sidebarScroll.drawsBackground = false
         operationProgress.style = .bar; operationProgress.minValue = 0; operationProgress.maxValue = 1
         operationProgress.setAccessibilityLabel("Archive progress")
-        operationLabel.font = .systemFont(ofSize: 11); operationLabel.textColor = .secondaryLabelColor; operationLabel.maximumNumberOfLines = 3
+        operationLabel.font = .systemFont(ofSize: 11); operationLabel.textColor = .secondaryLabelColor; operationLabel.maximumNumberOfLines = 1
         operationStack.orientation = .vertical; operationStack.alignment = .leading; operationStack.spacing = 4
         operationStack.addArrangedSubview(operationProgress); operationStack.addArrangedSubview(operationLabel); operationStack.isHidden = true
         let navigation = NSStackView(views: [search, operationStack, sidebarScroll])
@@ -58,7 +59,22 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
         NSLayoutConstraint.activate([navigation.topAnchor.constraint(equalTo: left.view.topAnchor, constant: 10), navigation.leadingAnchor.constraint(equalTo: left.view.leadingAnchor, constant: 12), navigation.trailingAnchor.constraint(equalTo: left.view.trailingAnchor, constant: -12), navigation.bottomAnchor.constraint(equalTo: left.view.bottomAnchor), search.widthAnchor.constraint(equalTo: navigation.widthAnchor), sidebarScroll.widthAnchor.constraint(equalTo: navigation.widthAnchor), operationStack.widthAnchor.constraint(equalTo: navigation.widthAnchor), operationProgress.widthAnchor.constraint(equalTo: operationStack.widthAnchor), operationProgress.heightAnchor.constraint(equalToConstant: 6), operationLabel.widthAnchor.constraint(equalTo: operationStack.widthAnchor)])
         configure(transcript); transcript.style = .plain; transcript.selectionHighlightStyle = .none; transcript.intercellSpacing = .zero; transcript.setAccessibilityIdentifier("transcriptList")
         transcriptScroll.documentView = transcript; transcriptScroll.hasVerticalScroller = true; transcriptScroll.drawsBackground = false
-        fill(transcriptScroll, in: right.view)
+        conversationHeading.font = .systemFont(ofSize: 14, weight: .semibold)
+        conversationHeading.lineBreakMode = .byTruncatingTail
+        conversationHeading.maximumNumberOfLines = 1
+        conversationHeading.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        conversationHeading.translatesAutoresizingMaskIntoConstraints = false
+        transcriptScroll.translatesAutoresizingMaskIntoConstraints = false
+        right.view.addSubview(conversationHeading); right.view.addSubview(transcriptScroll)
+        NSLayoutConstraint.activate([
+            conversationHeading.topAnchor.constraint(equalTo: right.view.topAnchor, constant: 12),
+            conversationHeading.leadingAnchor.constraint(equalTo: right.view.leadingAnchor, constant: 24),
+            conversationHeading.trailingAnchor.constraint(equalTo: right.view.trailingAnchor, constant: -24),
+            transcriptScroll.topAnchor.constraint(equalTo: conversationHeading.bottomAnchor, constant: 12),
+            transcriptScroll.leadingAnchor.constraint(equalTo: right.view.leadingAnchor),
+            transcriptScroll.trailingAnchor.constraint(equalTo: right.view.trailingAnchor),
+            transcriptScroll.bottomAnchor.constraint(equalTo: right.view.bottomAnchor)
+        ])
         transcriptScroll.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification, object: transcriptScroll.contentView)
         empty.alignment = .center; empty.font = .systemFont(ofSize: 14); empty.textColor = .secondaryLabelColor
@@ -82,7 +98,7 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
     func showOperationProgress(_ value: ImportProgress?) {
         operationStack.isHidden = value == nil
         guard let value else { operationProgress.stopAnimation(nil); if let selected { updateHeading(selected) } else { view.window?.subtitle = "" }; return }
-        view.window?.subtitle = value.phase + (value.fraction.map { " · \(Int($0 * 100))%" } ?? "")
+
         operationLabel.stringValue = value.description
         operationProgress.isIndeterminate = value.fraction == nil
         if let fraction = value.fraction { operationProgress.stopAnimation(nil); operationProgress.doubleValue = fraction }
@@ -103,13 +119,13 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
     }
     func configureWindow(_ window: NSWindow) {
         _ = view
-        window.toolbarStyle = .unified; window.titleVisibility = .visible
+        window.toolbarStyle = .unified; window.titleVisibility = .hidden
         let toolbar = NSToolbar(identifier: "Conversations"); toolbar.delegate = self; toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false; window.toolbar = toolbar
     }
     private static let separatorID = NSToolbarItem.Identifier("ConversationSeparator")
     private static let infoID = NSToolbarItem.Identifier("ConversationInfo")
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [.toggleSidebar, Self.separatorID, .flexibleSpace, Self.infoID] }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [Self.separatorID, .flexibleSpace, Self.infoID] }
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) }
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         if id == Self.separatorID { return NSTrackingSeparatorToolbarItem(identifier: id, splitView: splitView, dividerIndex: 0) }
@@ -225,8 +241,10 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
         select(result.conversation, target: result.hit?.ordinal)
     }
     private func updateHeading(_ conversation: Conversation) {
+        conversationHeading.stringValue = conversation.title
+        conversationHeading.toolTip = conversation.title
         view.window?.title = scope == .allRecords ? "Archive Records · " + conversation.title : conversation.title
-        view.window?.subtitle = conversation.project.isEmpty ? "" : URL(fileURLWithPath: conversation.project).lastPathComponent
+        view.window?.subtitle = ""
         infoItem?.isEnabled = true
     }
     private func select(_ conversation: Conversation, target: Int? = nil) {

@@ -45,3 +45,9 @@ Histodex → Settings (⌘,) owns folder selection, read-only bookmarks, update 
 ## Validation for this revision
 
 The application was not launched. No Computer Use, screenshots, accessibility automation or visual inspection was performed, as requested. Validation consists of source review against native conventions, compile-only Xcode builds, and headless package tests. Eight focused presentation tests cover grouping/provenance, message roles, structured output, collapsed payloads, sizing bounds, search highlighting, Markdown paragraph structure and outgoing links. Runtime appearance and interaction fidelity are not claimed to be visually verified.
+
+## Fixed sidebar revision (2026-09-07)
+
+The supplied Messages comparison informed this revision. The sidebar is permanently visible, with no toolbar toggle. The unified toolbar retains a split-tracking separator and the conversation Info action. Native window title metadata remains available, but its toolbar display is hidden; a truncating, noninteractive heading is constrained to the detail pane, preventing titles from widening the sidebar's toolbar region. Search and conversation rows retain native sidebar spacing.
+
+Progress in the sidebar and Settings consists of the operation, percentage when measurable, and a native progress indicator. Byte sizes and current filenames are omitted. Source review and compilation validate this change; the app was not launched or inspected through Computer Use.
