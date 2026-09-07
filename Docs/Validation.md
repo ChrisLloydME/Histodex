@@ -37,3 +37,10 @@
 The follow-up redesign was validated without launching Histodex or using Computer Use, per the user's instruction. Compile-only Xcode validation succeeds. The package suite discovers 27 tests: 26 pass and the optional private real-fixture test is skipped when its environment variable is absent. Eight new presentation tests cover grouping, role hierarchy, readable structured data, collapsed payloads, shared geometry bounds, truncation/highlighting, Markdown table/list structure and outgoing link contrast. The earlier runtime smoke check above applies to the original interface only.
 
 The redesigned browser uses a Messages-style sidebar, native split-view/toolbar integration, aligned message bubbles and collapsed technical records. Import and maintenance controls are now in Settings. See ConversationDesign.md for implementation and validation details. No visual or runtime-interaction verification is claimed for this redesign.
+
+
+## Record semantics and title validation (2026-09-07)
+
+The 34-test headless package suite passes, including the three project-local real-session fixtures. Seven new regressions verify context classification, mixed context/request splitting, legacy environment records, typed agent coordination, conversation counts/previews, scoped search and paging, exact search targets, name-index updates without changed rollouts, offline name persistence, rename timestamp precedence, inherited/foreign title isolation, and an actual v2-to-v3 schema migration followed by idempotent offline repair. Quoted/incomplete envelope examples remain unchanged. The real-fixture test now also checks title and conversation-message context boundaries.
+
+The compile-only, signed Xcode app build passes. No application launch, Computer Use, screenshot, visual inspection or app-hosted UI test was performed for this revision. Existing installed archives were not accessed or modified during development; automatic repair runs when the user next opens the updated app. Sources remain read-only, and fixture/build writes stay under the project's ignored `.tmp/` directory.

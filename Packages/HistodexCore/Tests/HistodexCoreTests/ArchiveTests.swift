@@ -209,6 +209,10 @@ final class ArchiveTests: XCTestCase, @unchecked Sendable {
         for conversation in conversations {
             let items = try await store.items(conversationID: conversation.id)
             XCTAssertFalse(items.isEmpty)
+            XCTAssertTrue(ConversationSemantics.separateContext(conversation.title).context.isEmpty)
+            let messages = try await store.items(conversationID: conversation.id, scope: .conversation)
+            XCTAssertTrue(messages.allSatisfy { $0.category == .conversation })
+            XCTAssertTrue(messages.filter { $0.role == "user" }.allSatisfy { ConversationSemantics.separateContext($0.text).context.isEmpty })
             XCTAssertTrue(items.allSatisfy { $0.rawLength > 0 || $0.isDiagnostic })
         }
         let reparsed = try await store.reparseArchive()

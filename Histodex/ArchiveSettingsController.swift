@@ -31,7 +31,7 @@ final class ArchiveSettingsController: NSViewController {
         let sourceButtons = NSStackView(views: [choose, update]); sourceButtons.spacing = 8
         let permissions = note("Histodex only reads the selected folder. Imported conversations and attachments are copied into an independent archive on this Mac.")
         let location = note(store.root.path); location.isSelectable = true
-        let maintenance = note("Rebuild the index from archived snapshots when a parser update becomes available. Your Codex folder is not needed.")
+        let maintenance = note("Parser updates repair the archive automatically. You can also rebuild from archived snapshots here. Your Codex folder is not needed.")
         progress.style = .bar; progress.isIndeterminate = false; progress.minValue = 0; progress.maxValue = 1; progress.isHidden = true
         status.font = .systemFont(ofSize: 12); status.textColor = .secondaryLabelColor; status.maximumNumberOfLines = 3
         let progressRow = NSStackView(views: [progress, cancel]); progressRow.spacing = 10

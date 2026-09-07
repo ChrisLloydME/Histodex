@@ -54,3 +54,14 @@ Archive schema v2 adds persistent source aliases for content-deduplicated snapsh
 ## Conversation presentation revision
 
 The Messages-inspired AppKit interface adds an owned `TranscriptEntry` display projection and a shared `TranscriptLayout` geometry cache. Routine events are grouped for disclosure without deleting archive items; exact search targets remain resolvable inside groups. Native `NSSplitViewController` and unified-toolbar navigation replace the original header/control stacks. Source permissions and maintenance move into an independent Settings controller. The database adds only a bounded conversation-preview query and optional reading-position lookup; the archive schema and import adapter are unchanged by this presentation revision. See ConversationDesign.md.
+
+
+## Record semantics and title repair (2026-09-07)
+
+The root cause was normalization: response messages with a user role were assumed to be user requests, including injected AGENTS and environment text. The first such text also supplied the fallback title. A shape-only survey of 24 local sessions found AGENTS/environment envelopes in 20 first user-role records. The importer also omitted Codex's name index and allowed inherited history to select child titles.
+
+Schema v3 and adapter v3 persist `RecordCategory` independently of the source item kind. Conversation, activity, context, metadata and unknown records retain provenance. A complete leading context envelope followed by actual request text produces two normalized items sharing the original raw range. Ordinary mentions, quoted examples and incomplete envelopes are not stripped. Role-specific instructions and typed inter-agent messages are supporting context. New unsupported forms remain preserved; heuristic recognition of future user-role envelopes is not guaranteed.
+
+Scoped SQL queries provide consistent transcript/search/pagination semantics. Main conversation counts and previews exclude supporting records. The all-records API remains available for archival inspection, including unknown data. Renderer grouping is only formatting within the selected scope.
+
+Codex's [session index implementation](https://github.com/openai/codex/blob/main/codex-rs/rollout/src/session_index.rs) defines append-only `id`, `thread_name`, `updated_at` records with last-entry precedence. Histodex snapshots this optional source using the same read-only, fixed-prefix mechanism as rollouts. Selected names retain owned raw paths and byte offsets. The normalized name table survives offline reparsing. Index updates apply even when session snapshots are unchanged; newer own-thread rename events outrank older index timestamps. Explicit names remain intact; only extractive fallback titles are shortened. Context scaffolding, foreign-thread renames and inherited segments cannot name the child. The native browser requests an idempotent outdated-parser repair before its initial queries, without opening the original source folder.

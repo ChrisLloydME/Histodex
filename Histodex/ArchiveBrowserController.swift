@@ -3,6 +3,7 @@ import HistodexCore
 
 final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSToolbarDelegate {
     private let store: ArchiveStore
+    private let scope: ArchiveScope
     private let sidebar = NSTableView()
     private let transcript = NSTableView()
     private let transcriptScroll = NSScrollView()
@@ -30,7 +31,7 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
     private var headerItem: NSToolbarItem?
     private var infoItem: NSToolbarItem?
 
-    init(store: ArchiveStore) { self.store = store; super.init(nibName: nil, bundle: nil) }
+    init(store: ArchiveStore, scope: ArchiveScope = .conversation) { self.store = store; self.scope = scope; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("Use init(store:)") }
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -57,7 +58,15 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
         center(empty, in: right.view, width: 350); center(sidebarEmpty, in: left.view, width: 220)
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold); titleLabel.lineBreakMode = .byTruncatingTail
         subtitle.font = .systemFont(ofSize: 11); subtitle.textColor = .secondaryLabelColor; subtitle.lineBreakMode = .byTruncatingMiddle
-        reloadSidebar()
+        search.isEnabled = false
+        sidebarEmpty.stringValue = "Updating Archive…"
+        Task {
+            do {
+                let report = try await store.reparseArchive(onlyOutdated: true)
+                if !report.errors.isEmpty { show(ArchiveError.invalidArchive(report.errors.joined(separator: "\n"))) }
+                search.isEnabled = true; reloadSidebar()
+            } catch { sidebarEmpty.stringValue = "Archive Update Failed"; show(error) }
+        }
     }
     deinit { NotificationCenter.default.removeObserver(self) }
     private func configure(_ table: NSTableView) {
@@ -100,8 +109,18 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
     @objc private func showConversationInfo() {
         guard let selected, let window = view.window else { return }
         let alert = NSAlert(); alert.messageText = selected.title
-        alert.informativeText = "Project: \(selected.project)\nStarted: \(ConversationDates.full(selected.startedAt))\n\(selected.itemCount) archived records\n\(selected.warningCount) archive notices"
-        alert.beginSheetModal(for: window)
+        alert.informativeText = "Project: \(selected.project)\nStarted: \(ConversationDates.full(selected.startedAt))\n\(selected.itemCount) conversation items\n\(selected.warningCount) archive notices"
+        alert.addButton(withTitle: "Done")
+        if scope == .conversation { alert.addButton(withTitle: "Browse All Records…") }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertSecondButtonReturn, let self else { return }
+            let controller = ArchiveBrowserController(store: self.store, scope: .allRecords)
+            let recordsWindow = NSWindow(contentViewController: controller)
+            controller.configureWindow(recordsWindow)
+            recordsWindow.setContentSize(NSSize(width: 1100, height: 760)); recordsWindow.center()
+            let wc = NSWindowController(window: recordsWindow); self.detailWindows.append(wc); wc.showWindow(nil)
+            controller.select(selected)
+        }
     }
     func focusSearch() { if splitViewItems[0].isCollapsed { splitViewItems[0].isCollapsed = false }; view.window?.makeFirstResponder(search) }
     func controlTextDidChange(_ obj: Notification) { reloadSidebar(debounce: true) }
@@ -112,7 +131,7 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
                 if debounce { try await Task.sleep(for: .milliseconds(180)) }
                 let list = try await store.conversations()
                 let matches = query.isEmpty ? list : try await store.conversations(filter: query)
-                let hits = query.isEmpty ? [] : try await store.search(query)
+                let hits = query.isEmpty ? [] : try await store.search(query, scope: scope)
                 guard !Task.isCancelled else { return }
                 let oldKey = results.indices.contains(sidebar.selectedRow) ? results[sidebar.selectedRow].key : nil
                 allConversations = list
@@ -123,7 +142,12 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
                 sidebar.reloadData(); sidebarEmpty.isHidden = !results.isEmpty
                 sidebarEmpty.stringValue = query.isEmpty ? "No Conversations\n\nImport your history in Settings." : "No Results\n\nTry another word, project, or date."
                 if let index = results.firstIndex(where: { $0.key == oldKey }) { sidebar.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false) }
-                if let current = selected, let fresh = byID[current.id] { selected = fresh; updateHeading(fresh) }
+                if let current = selected, let fresh = byID[current.id] {
+                    selected = fresh; updateHeading(fresh)
+                    if sidebar.selectedRow < 0, let index = results.firstIndex(where: { $0.conversation.id == fresh.id && $0.hit == nil }) {
+                        sidebar.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+                    }
+                }
             } catch is CancellationError {} catch { show(error) }
         }
     }
@@ -188,8 +212,8 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
         select(result.conversation, target: result.hit?.ordinal)
     }
     private func updateHeading(_ conversation: Conversation) {
-        titleLabel.stringValue = conversation.title; subtitle.stringValue = URL(fileURLWithPath: conversation.project).lastPathComponent
-        titleLabel.toolTip = conversation.title; subtitle.toolTip = conversation.project; view.window?.title = conversation.title; infoItem?.isEnabled = true
+        titleLabel.stringValue = scope == .allRecords ? "Archive Records · " + conversation.title : conversation.title; subtitle.stringValue = URL(fileURLWithPath: conversation.project).lastPathComponent
+        titleLabel.toolTip = conversation.title; subtitle.toolTip = conversation.project; view.window?.title = titleLabel.stringValue; infoItem?.isEnabled = true
     }
     private func select(_ conversation: Conversation, target: Int? = nil) {
         positionTask?.cancel(); generation = UUID(); let token = generation
@@ -197,11 +221,11 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
         applyingPage = true; entries = []; layouts.removeAll(); hasEarlier = false; hasLater = false; transcript.reloadData()
         Task {
             do {
-                let saved = try await store.savedPosition(conversationID: conversation.id)
+                let saved = scope == .conversation ? try await store.savedPosition(conversationID: conversation.id) : nil
                 let start: Int
-                if let target { start = try await store.precedingPageStart(conversationID: conversation.id, before: target, limit: 12) }
+                if let target { start = try await store.precedingPageStart(conversationID: conversation.id, before: target, limit: 12, scope: scope) }
                 else if let saved { start = saved }
-                else { start = try await store.precedingPageStart(conversationID: conversation.id, before: Int.max) }
+                else { start = try await store.precedingPageStart(conversationID: conversation.id, before: Int.max, scope: scope) }
                 guard generation == token else { return }
                 loadPage(from: start, scrollTo: target, atEnd: target == nil && saved == nil)
             } catch { guard generation == token else { return }; applyingPage = false; show(error) }
@@ -211,13 +235,14 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
         guard let selected else { return }; generation = UUID(); let token = generation; applyingPage = true
         Task {
             do {
-                var items = try await store.items(conversationID: selected.id, from: ordinal)
-                if items.isEmpty && ordinal > 0 { items = try await store.items(conversationID: selected.id) }
-                let earliest = try await store.items(conversationID: selected.id, limit: 1).first?.ordinal
-                let later = try await store.items(conversationID: selected.id, from: (items.last?.ordinal ?? -1) + 1, limit: 1)
+                var items = try await store.items(conversationID: selected.id, from: ordinal, scope: scope)
+                if items.isEmpty && ordinal > 0 { items = try await store.items(conversationID: selected.id, scope: scope) }
+                let earliest = try await store.items(conversationID: selected.id, limit: 1, scope: scope).first?.ordinal
+                let later = try await store.items(conversationID: selected.id, from: (items.last?.ordinal ?? -1) + 1, limit: 1, scope: scope)
                 guard generation == token else { return }
                 entries = TranscriptEntry.project(items); layouts.removeAll(); hasEarlier = earliest.map { $0 < (items.first?.ordinal ?? 0) } ?? false; hasLater = !later.isEmpty
                 if let target = scrollTo, let entry = entries.first(where: { $0.contains(ordinal: target) }) { expanded.insert(entry.id) }
+                empty.stringValue = "No Conversation Messages\n\nSupporting records are available in Conversation Info → Browse All Records."
                 transcript.reloadData(); view.layoutSubtreeIfNeeded(); empty.isHidden = !items.isEmpty
                 if let target = scrollTo, let index = entries.firstIndex(where: { $0.contains(ordinal: target) }) { transcript.scrollRowToVisible(index + offset) }
                 else if atEnd && !entries.isEmpty { transcript.scrollRowToVisible(entries.count - 1 + offset) }
@@ -229,11 +254,11 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
     @objc private func earlier() {
         guard let selected, let first = entries.first?.items.first else { return }
         let token = generation
-        Task { do { let start = try await store.precedingPageStart(conversationID: selected.id, before: first.ordinal); guard generation == token else { return }; loadPage(from: start, atEnd: true) } catch { show(error) } }
+        Task { do { let start = try await store.precedingPageStart(conversationID: selected.id, before: first.ordinal, scope: scope); guard generation == token else { return }; loadPage(from: start, atEnd: true) } catch { show(error) } }
     }
     @objc private func later() { if let last = entries.last?.items.last { loadPage(from: last.ordinal + 1) } }
     @objc private func scrolled() {
-        guard !applyingPage, let selected else { return }
+        guard scope == .conversation, !applyingPage, let selected else { return }
         let row = transcript.rows(in: transcript.visibleRect).location - offset
         guard entries.indices.contains(row) else { return }
         let ordinal = entries[row].items[0].ordinal; positionTask?.cancel()

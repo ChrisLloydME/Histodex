@@ -54,7 +54,7 @@ final class ItemDetailController: NSViewController {
         offset = 0; assets.removeAllItems()
         for (i, asset) in item.assets.enumerated() { assets.addItem(withTitle: "\(i + 1). \(asset.sourceReference.prefix(90))") }
         assets.isHidden = item.assets.isEmpty; image.isHidden = item.assets.isEmpty; assetInfo.isHidden = item.assets.isEmpty
-        provenance.stringValue = "\(item.sourceType) · \(ConversationDates.full(item.timestamp))\n\(item.rawPath) · bytes \(item.rawOffset)–\(item.rawOffset + item.rawLength)"
+        provenance.stringValue = "\(item.category.rawValue.capitalized) · \(item.sourceType) · \(ConversationDates.full(item.timestamp))\n\(item.rawPath) · bytes \(item.rawOffset)–\(item.rawOffset + item.rawLength)"
         loadText(); showAsset()
     }
     @objc private func modeChanged() { loadText() }
