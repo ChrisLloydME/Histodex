@@ -67,9 +67,10 @@ final class PresentationTests: XCTestCase {
         XCTAssertLessThanOrEqual(layout.attributedText.length, 4501)
         XCTAssertLessThanOrEqual(layout.textHeight, 900)
     }
-    @MainActor func testMarkdownTablesSeparateHeaderAndListsIndentWrappedText() {
+    @MainActor func testMarkdownTablesFlowWithColumnLabelsAndListsIndentWrappedText() {
         let table = NativeMarkdown.render("| Layer | Purpose |\n| --- | --- |\n| Archive | Preservation |")
-        XCTAssertTrue(table.string.contains("Layer\tPurpose\t\nArchive"))
+        XCTAssertTrue(table.string.contains("Layer: Archive\nPurpose: Preservation"))
+        XCTAssertFalse(table.string.contains("\t"))
         let list = NativeMarkdown.render("- First item with text\n- Second item")
         let style = list.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
         XCTAssertGreaterThan(style?.headIndent ?? 0, style?.firstLineHeadIndent ?? 0)

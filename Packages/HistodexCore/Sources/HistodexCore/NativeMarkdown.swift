@@ -3,7 +3,7 @@ import Markdown
 
 /// AST to native attributed text. Never evaluates HTML, fetches URLs, or executes code.
 @MainActor public enum NativeMarkdown {
-    public static func render(_ source: String, monospaced: Bool = false) -> NSAttributedString {
+    public static func render(_ source: String, monospaced: Bool = false, preserveLineBreaks: Bool = false) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle(); paragraph.lineSpacing = 3; paragraph.paragraphSpacing = 7
         let base: [NSAttributedString.Key: Any] = [.font: monospaced ? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular) : NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.textColor, .paragraphStyle: paragraph]
         if monospaced { return NSAttributedString(string: source, attributes: base) }
@@ -31,7 +31,7 @@ import Markdown
                 quote.headIndent = CGFloat((depth + 1) * 16); quote.firstLineHeadIndent = quote.headIndent
                 style[.paragraphStyle] = quote
             }
-            if node is SoftBreak { append(" ", style); return }
+            if node is SoftBreak { append(preserveLineBreaks ? "\n" : " ", style); return }
             if node is LineBreak { append("\n", style); return }
             if node is ThematicBreak { append("────────────\n", style); return }
             if let image = node as? Markdown.Image { append("[Image: \(image.plainText)]", style); return }
@@ -50,14 +50,23 @@ import Markdown
                 }
                 append("\n", style); return
             }
-            if node is Table {
-                let tableStyle = paragraph.mutableCopy() as! NSMutableParagraphStyle
-                tableStyle.tabStops = (1...12).map { NSTextTab(textAlignment: .left, location: CGFloat($0 * 160)) }
-                tableStyle.paragraphSpacing = 6
-                style[.paragraphStyle] = tableStyle
+            if let table = node as? Table {
+                // Flow cells vertically with their column labels so long values wrap
+                // inside a message bubble instead of disappearing beyond fixed tabs.
+                let headers = table.head.children.map { ($0 as? Table.Cell)?.plainText ?? "" }
+                for (rowIndex, row) in table.body.children.enumerated() {
+                    if rowIndex > 0 { append("\n", style) }
+                    for (index, cell) in row.children.enumerated() {
+                        var labelStyle = style
+                        labelStyle[.font] = NSFont.systemFont(ofSize: 13, weight: .semibold)
+                        let label = headers.indices.contains(index) && !headers[index].isEmpty ? headers[index] : "Column \(index + 1)"
+                        append(label + ": ", labelStyle)
+                        for child in cell.children { walk(child, style, depth: depth) }
+                        append("\n", style)
+                    }
+                }
+                append("\n", style); return
             }
-            if node is Table.Head { style[.font] = NSFont.systemFont(ofSize: 13, weight: .semibold) }
-            if node is Table.Cell { for child in node.children { walk(child, style, depth: depth) }; append("\t", style); return }
             for child in node.children { walk(child, style, depth: depth) }
             if node is Paragraph || node is Heading || node is Table.Row || node is Table.Head { append("\n", style) }
         }

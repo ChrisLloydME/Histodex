@@ -69,7 +69,7 @@ final class ItemDetailController: NSViewController {
                 var display = item; display.text = value
                 if readable {
                     let entry = TranscriptEntry.project([display])[0]
-                    text.textStorage?.setAttributedString(NativeMarkdown.render(entry.body, monospaced: entry.usesMonospacedText))
+                    text.textStorage?.setAttributedString(NativeMarkdown.render(entry.body, monospaced: entry.usesMonospacedText, preserveLineBreaks: entry.style == .outgoing))
                 } else { text.textStorage?.setAttributedString(NSAttributedString(string: value, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .foregroundColor: NSColor.textColor])) }
                 text.scrollToBeginningOfDocument(nil)
                 pageLabel.stringValue = "\(requestedOffset + 1)–\(min(item.textLength, requestedOffset + 64000)) of \(item.textLength) characters"

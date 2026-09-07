@@ -85,7 +85,7 @@ public struct TranscriptEntry: Identifiable, Sendable {
               previous.turnID == next.turnID,
               (next.kind == .message && next.role == "assistant") || [.toolResult, .commandOutput].contains(next.kind) else { return false }
         if !previous.messageID.isEmpty || !next.messageID.isEmpty {
-            return !previous.messageID.isEmpty && previous.messageID == next.messageID && (previous.isDelta || next.isDelta)
+            return !previous.messageID.isEmpty && previous.messageID == next.messageID
         }
         return previous.isDelta && next.isDelta && previous.toolName == next.toolName && previous.callID == next.callID
     }

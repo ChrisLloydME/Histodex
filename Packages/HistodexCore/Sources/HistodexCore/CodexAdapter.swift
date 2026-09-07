@@ -153,6 +153,7 @@ struct CodexAdapter {
         }
         if item.kind == .message {
             item.category = ["user", "assistant"].contains(item.role) ? .conversation : .context
+            if item.role == "assistant", item.channel == "analysis" { item.kind = .reasoning; item.category = .activity }
             if item.role == "assistant", !p["recipient"].string.isEmpty, p["recipient"].string != "all" { item.category = .activity }
             if item.role == "user" {
                 let split = ConversationSemantics.separateContext(item.text)

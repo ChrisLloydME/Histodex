@@ -27,7 +27,7 @@ import AppKit
         let preview = String(fullText.prefix(limit))
         truncated = preview.count < fullText.count || entry.items.contains { $0.textLength > $0.text.count }
         let visible = activity && !expanded ? "" : preview
-        let rendered = NativeMarkdown.render(visible, monospaced: entry.usesMonospacedText)
+        let rendered = NativeMarkdown.render(visible, monospaced: entry.usesMonospacedText, preserveLineBreaks: entry.style == .outgoing)
         if entry.style == .outgoing {
             let colored = NSMutableAttributedString(attributedString: rendered)
             colored.addAttribute(.foregroundColor, value: NSColor.white, range: NSRange(location: 0, length: colored.length))

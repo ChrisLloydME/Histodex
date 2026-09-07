@@ -79,6 +79,11 @@ extension ArchiveTests {
         XCTAssertEqual(conversations.first?.title, "Repair conversation ordering")
         let quoted = "Here is a sample:\n```xml\n<turn_aborted reason=\"sample\">Example</turn_aborted>\n```"
         XCTAssertEqual(ConversationSemantics.separateContext(quoted).message, quoted)
+        let adjacent = "<environment_context>workspace</environment_context><user_instructions>setup</user_instructions>\nActual request"
+        let separated = ConversationSemantics.separateContext(adjacent)
+        XCTAssertEqual(separated.message, "Actual request")
+        XCTAssertTrue(separated.context.contains("<user_instructions>"))
+        XCTAssertTrue(ConversationSemantics.separateContext(separated.message).context.isEmpty)
     }
 
     func testToolOutputPreservesBothChannelsAndExitStatus() {
@@ -103,6 +108,19 @@ extension ArchiveTests {
         let items = try await store.items(conversationID: "test-session", scope: .conversation)
         XCTAssertEqual(items.map(\.text), ["Describe this image", "A small image."])
         XCTAssertEqual(items.first?.assets.count, 1)
+    }
+
+    func testAnalysisChannelIsActivityAndFinalChannelIsConversation() async throws {
+        let work = try workspace()
+        _ = try source(work, metadata() + message("Explain the result")
+            + record("response_item", ["type": "message", "role": "assistant", "channel": "analysis", "content": "Private working notes"])
+            + record("response_item", ["type": "message", "role": "assistant", "channel": "final", "content": "The readable result"]))
+        let store = try ArchiveStore(root: work.appendingPathComponent("archive"))
+        _ = try await store.importDirectory(work.appendingPathComponent("codex"))
+        let conversation = try await store.items(conversationID: "test-session", scope: .conversation)
+        XCTAssertEqual(conversation.map(\.text), ["Explain the result", "The readable result"])
+        let records = try await store.items(conversationID: "test-session")
+        XCTAssertTrue(records.contains { $0.kind == .reasoning && $0.category == .activity && $0.text == "Private working notes" })
     }
 
 }
