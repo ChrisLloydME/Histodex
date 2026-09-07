@@ -15,11 +15,11 @@ A native, offline macOS archive for Codex conversation history. **Codex is an im
 Open `Histodex.xcodeproj` in Xcode 16 or newer with Swift 6 support, select the Histodex scheme, and run on macOS 14 or newer. Dependencies are pinned; the first build needs internet access. The application does not.
 
 1. Open **Histodex → Settings…** (⌘,) and click **Choose Folder…** to select your `.codex` directory. Hidden folders are visible in the picker.
-2. Histodex snapshots rollouts from `sessions/` and `archived_sessions/` and the optional conversation-name index, then parses its own copies. Source files are never modified. Progress, cancellation and errors stay in Settings.
+2. Histodex snapshots rollouts from `sessions/` and `archived_sessions/` and optional Codex title metadata (the name index and state database/WAL), then parses its own copies. Source files are never modified. Progress, cancellation and errors stay in Settings.
 3. Choose a conversation from the sidebar. The search field finds titles, projects, dates and conversation content; selecting a content result opens its exact item.
 4. Read user messages on the right and assistant replies on the left. Conversation Info → **Browse All Records…** opens a separate searchable window for commands, reasoning, injected instructions, session activity and unknown records. Earlier/later navigation appears at the edges of the transcript, and your reading position is restored.
 5. Use the ellipsis beside an entry for readable full text, original archived text, attachments and provenance. Long output is paged. Missing attachments remain explicit.
-6. Use **Import Updates** or **Rebuild Conversation Index** in Settings for archive maintenance. Parser updates automatically repair existing conversations from owned snapshots. Manual rebuilding also works without Codex; Import Updates refreshes saved Codex titles.
+6. Use **Update Archive** or **Rebuild Conversation Index** in Settings for archive maintenance. Parser updates automatically repair existing conversations from owned snapshots. Manual rebuilding also works without Codex; Update Archive refreshes saved Codex titles.
 
 Imported data lives in the application's sandbox Application Support directory, under `Histodex/`: SQLite, `raw/`, content-addressed `assets/sha256/`, and working directories. Keep that entire directory when backing up the archive; the database alone does not contain raw data or image bytes.
 

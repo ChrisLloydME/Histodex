@@ -29,6 +29,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let store = try ArchiveStore(root: root)
             let content = ArchiveBrowserController(store: store); browser = content
             let configuration = ArchiveSettingsController(store: store); settings = configuration
+            configuration.onProgress = { [weak content] value in content?.showOperationProgress(value) }
+            content.onIndexingStateChanged = { [weak configuration] busy in
+                configuration?.setExternalBusy(busy)
+                #if DEBUG
+                if !busy, let source = ProcessInfo.processInfo.environment["HISTODEX_IMPORT_PATH"] {
+                    configuration?.importSource(URL(fileURLWithPath: source))
+                }
+                #endif
+            }
             configuration.onArchiveChanged = { [weak content] in content?.archiveDidChange() }
             let window = NSWindow(contentViewController: content)
             content.configureWindow(window)
@@ -36,9 +45,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.center(); window.setFrameAutosaveName("ArchiveWindow")
             let controller = NSWindowController(window: window); windowController = controller
             controller.showWindow(nil); NSApp.activate(ignoringOtherApps: true)
-            #if DEBUG
-            if let source = ProcessInfo.processInfo.environment["HISTODEX_IMPORT_PATH"] { configuration.importSource(URL(fileURLWithPath: source)) }
-            #endif
         } catch { NSAlert(error: error).runModal(); NSApp.terminate(nil) }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

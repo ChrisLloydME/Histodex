@@ -5,9 +5,11 @@ import HistodexCore
 final class ArchiveSettingsController: NSViewController {
     private let store: ArchiveStore
     var onArchiveChanged: (() -> Void)?
+    var onProgress: ((ImportProgress?) -> Void)?
+    private var externalBusy = false
     private let source = NSTextField(labelWithString: "No folder selected")
     private let choose = NSButton(title: "Choose Folder…", target: nil, action: nil)
-    private let update = NSButton(title: "Import Updates", target: nil, action: nil)
+    private let update = NSButton(title: "Update Archive", target: nil, action: nil)
     private let rebuild = NSButton(title: "Rebuild Conversation Index", target: nil, action: nil)
     private let cancel = NSButton(title: "Cancel", target: nil, action: nil)
     private let progress = NSProgressIndicator()
@@ -41,7 +43,7 @@ final class ArchiveSettingsController: NSViewController {
         let stack = NSStackView(views: [heading("Import Source"), source, sourceButtons, permissions, separator(), heading("Archive"), location, rebuild, maintenance, progressRow, status, errorScroll])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(stack)
-        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24), stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24), stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 22), stack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -22), errorScroll.heightAnchor.constraint(equalToConstant: 100), progress.widthAnchor.constraint(greaterThanOrEqualToConstant: 350)])
+        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24), stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24), stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 22), stack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -22), errorScroll.heightAnchor.constraint(equalToConstant: 100), progress.widthAnchor.constraint(greaterThanOrEqualToConstant: 350), progress.heightAnchor.constraint(equalToConstant: 8)])
         for child in [source, permissions, location, maintenance, status, errorScroll] { child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         source.stringValue = UserDefaults.standard.string(forKey: "sourceDisplayPath") ?? "No folder selected"
         setBusy(false)
@@ -51,7 +53,7 @@ final class ArchiveSettingsController: NSViewController {
     private func separator() -> NSBox { let box = NSBox(); box.boxType = .separator; return box }
 
     @objc func chooseFolder() {
-        guard operation == nil, let window = view.window else { return }
+        guard !externalBusy, operation == nil, let window = view.window else { return }
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false; panel.showsHiddenFiles = true
         panel.title = "Choose Codex Folder"; panel.message = "Select your .codex folder. Its files will only be read."; panel.prompt = "Choose"
         panel.beginSheetModal(for: window) { [weak self] response in
@@ -59,7 +61,7 @@ final class ArchiveSettingsController: NSViewController {
         }
     }
     @objc private func importUpdates() {
-        guard operation == nil, let data = UserDefaults.standard.data(forKey: "sourceBookmark") else { return }
+        guard !externalBusy, operation == nil, let data = UserDefaults.standard.data(forKey: "sourceBookmark") else { return }
         do {
             var stale = false
             let url = try URL(resolvingBookmarkData: data, options: [.withSecurityScope, .withoutUI], relativeTo: nil, bookmarkDataIsStale: &stale)
@@ -68,7 +70,7 @@ final class ArchiveSettingsController: NSViewController {
     }
     func importSource(_ url: URL) {
         _ = view
-        guard operation == nil else { return }
+        guard !externalBusy, operation == nil else { return }
         let accessed = url.startAccessingSecurityScopedResource()
         do {
             let bookmark = try url.bookmarkData(options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess], includingResourceValuesForKeys: nil, relativeTo: nil)
@@ -76,15 +78,14 @@ final class ArchiveSettingsController: NSViewController {
             UserDefaults.standard.set(url.path, forKey: "sourceDisplayPath"); source.stringValue = url.path
         } catch { /* One-time import remains available if saving the bookmark fails. */ }
         operationID = UUID(); let token = operationID
-        setBusy(true); errors.string = ""; errorScroll.isHidden = true; status.stringValue = "Preparing import…"
+        setBusy(true); errors.string = ""; errorScroll.isHidden = true; displayProgress(ImportProgress(completed: 0, total: 0, filename: "", phase: "Preparing archive update"))
         operation = Task {
-            defer { if accessed { url.stopAccessingSecurityScopedResource() }; operation = nil; setBusy(false) }
+            defer { if accessed { url.stopAccessingSecurityScopedResource() }; operation = nil; setBusy(false); onProgress?(nil) }
             do {
                 let report = try await store.importDirectory(url) { [self] value in
                     Task { @MainActor in
                         guard self.operationID == token, self.operation != nil else { return }
-                        self.progress.doubleValue = Double(value.completed) / Double(max(1, value.total))
-                        self.status.stringValue = value.filename
+                        self.displayProgress(value)
                     }
                 }
                 operationID = UUID(); finish(report)
@@ -93,12 +94,21 @@ final class ArchiveSettingsController: NSViewController {
         }
     }
     @objc func reparse() {
-        guard operation == nil else { return }
-        setBusy(true); errors.string = ""; errorScroll.isHidden = true; progress.isIndeterminate = true; progress.startAnimation(nil); status.stringValue = "Rebuilding conversation index…"
+        guard !externalBusy, operation == nil else { return }
+        operationID = UUID(); let token = operationID
+        setBusy(true); errors.string = ""; errorScroll.isHidden = true; displayProgress(ImportProgress(completed: 0, total: 0, filename: "", phase: "Preparing conversation index"))
         operation = Task {
-            defer { operation = nil; setBusy(false) }
-            do { finish(try await store.reparseArchive()) }
-            catch { status.stringValue = error is CancellationError ? "Rebuild canceled." : "Index could not be rebuilt."; errors.string = error.localizedDescription; errorScroll.isHidden = false }
+            defer { operation = nil; setBusy(false); onProgress?(nil) }
+            do {
+                let report = try await store.reparseArchive { [weak self] value in
+                    Task { @MainActor in
+                        guard let self, self.operationID == token, self.operation != nil else { return }
+                        self.displayProgress(value)
+                    }
+                }
+                operationID = UUID(); finish(report)
+            }
+            catch { operationID = UUID(); onArchiveChanged?(); status.stringValue = error is CancellationError ? "Rebuild canceled." : "Index could not be rebuilt."; errors.string = error.localizedDescription; errorScroll.isHidden = false }
         }
     }
     @objc private func cancelImportTask() { operation?.cancel() }
@@ -106,8 +116,18 @@ final class ArchiveSettingsController: NSViewController {
         status.stringValue = "\(report.imported) imported · \(report.unchanged) unchanged · \(report.errors.count) failed"
         errors.string = report.errors.joined(separator: "\n\n"); errorScroll.isHidden = report.errors.isEmpty; onArchiveChanged?()
     }
+    func setExternalBusy(_ busy: Bool) {
+        externalBusy = busy
+        if isViewLoaded { setBusy(operation != nil) }
+    }
+    private func displayProgress(_ value: ImportProgress) {
+        progress.isIndeterminate = value.fraction == nil
+        if let fraction = value.fraction { progress.stopAnimation(nil); progress.doubleValue = fraction }
+        else { progress.startAnimation(nil) }
+        status.stringValue = value.description; onProgress?(value)
+    }
     private func setBusy(_ busy: Bool) {
-        choose.isEnabled = !busy; update.isEnabled = !busy && UserDefaults.standard.data(forKey: "sourceBookmark") != nil; rebuild.isEnabled = !busy
+        choose.isEnabled = !busy && !externalBusy; update.isEnabled = !busy && !externalBusy && UserDefaults.standard.data(forKey: "sourceBookmark") != nil; rebuild.isEnabled = !busy && !externalBusy
         cancel.isHidden = !busy; progress.isHidden = !busy
         if !busy { progress.stopAnimation(nil); progress.isIndeterminate = false; progress.doubleValue = 0 }
     }

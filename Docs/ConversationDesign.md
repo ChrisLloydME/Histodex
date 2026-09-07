@@ -8,7 +8,7 @@ This is an archive reader. It uses those navigation, hierarchy and spacing conve
 
 - `NSSplitViewController` with a native sidebar item, system sidebar material and source-list selection. A tracking toolbar separator follows the divider. The system sidebar toggle supports collapsing navigation.
 - Conversation rows show title, a compact date, project, and a bounded message preview. One search field finds both conversation metadata and archived text; content results retain exact-item targets.
-- The unified toolbar contains the conversation title, project and Info command. Record counts, source paths and import notices belong in Info/details rather than a permanent transcript header.
+- The standard window title and subtitle show the conversation and project. The unified toolbar contains the sidebar toggle, tracking separator and Info command; no custom title view imposes a width on the split view. Record counts, source paths and import notices belong in Info/details rather than a permanent transcript header.
 - New conversations open at their latest page. Existing reading positions restore to the saved item. Earlier/later controls appear at the edges of the transcript, with database requests bounded to 100 items in the selected archive scope.
 - Time separators appear at meaningful gaps. User messages align right in blue; assistant messages align left with readable native Markdown. Width limits keep text lines comfortable in wide windows.
 
@@ -30,9 +30,13 @@ Conversation Info → Browse All Records opens a separate, paginated, searchable
 
 ## Titles and upgrades
 
-Import snapshots the optional `session_index.jsonl` name index into the archive before parsing it. The last valid name entry for each thread wins within the index. A newer, timestamped rename event belonging to that conversation takes precedence over a stale index entry. Without an explicit name, titles use the first meaningful request in the conversation's own history; known injected context and parent history cannot supply the child's title. Generic continuation requests can be replaced by a later substantive request. Fallbacks are extractive and bounded, not AI-generated summaries.
+Titles follow Agent Sessions' Codex source precedence: the last saved name in `session_index.jsonl`, then the state database's `threads.title` (or `first_user_message`), then the rollout-derived title. State rows match thread identity first, with a source-scoped rollout-path fallback. Histodex copies the state database and WAL before opening SQLite, checks that the source files stayed unchanged during copying, and preserves those owned copies. SQLite recovery only operates in Histodex's staging directory.
 
-On opening the browser, outdated projections are rebuilt from owned snapshots before loading the sidebar. Names and their source provenance stay in the local archive and survive source deletion. Import Updates refreshes saved Codex names even when rollout bytes have not changed. A missing name index never prevents rollout import.
+Without a saved title, the parser prefers a meaningful short user request in the first ten records, with full-history user/assistant/tool fallbacks. Multiline requests supply their collapsed text rather than only their first line. Parent history cannot name a child conversation.
+
+Outdated projections rebuild from owned snapshots before loading the sidebar. Update Archive acquires source titles that older imports did not preserve. Unchanged rollout files reuse owned snapshots after checking identity, size, and nanosecond modification/change timestamps. Changed files retain immutable content-addressed snapshots.
+
+Both archive updates and index rebuilds show progress in Settings and the sidebar. The native window subtitle also reports the current phase/percentage, including when the sidebar is collapsed. Discovery and title copying show indeterminate progress; copying and normalization report work counts and bytes. Startup repair disables conflicting archive maintenance until it finishes.
 
 ## Settings
 
