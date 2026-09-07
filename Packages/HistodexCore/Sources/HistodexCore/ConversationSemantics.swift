@@ -12,27 +12,47 @@ public enum ArchiveScope: Sendable {
 }
 
 enum ConversationSemantics {
-    /// Only consume complete, leading envelopes emitted by Codex. Quoted examples,
+    /// Consume complete, line-aligned envelopes emitted by Codex. Quoted examples,
     /// incomplete tags, and ordinary prose mentioning these names remain messages.
     static func separateContext(_ text: String) -> (context: String, message: String) {
-        var rest = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        var parts: [String] = []
-        while !rest.isEmpty {
-            var closing: String?
-            if rest.hasPrefix("# AGENTS.md instructions for "),
-               let opening = rest.range(of: "<INSTRUCTIONS>"),
-               !rest[..<opening.lowerBound].contains("\n\n# ") {
-                closing = "</INSTRUCTIONS>"
-            } else {
-                for tag in ["environment_context", "user_instructions", "turn_aborted", "permissions instructions", "collaboration_mode", "app-context", "skills_instructions", "multi_agent_role", "multi_agent_mode", "subagent_notification"] {
-                    if rest.hasPrefix("<\(tag)>") { closing = "</\(tag)>"; break }
+        var message = text; var contexts: [String] = []
+        while true {
+            let part = splitContextPass(message)
+            guard !part.context.isEmpty, part.message.count < message.count else { break }
+            contexts.append(part.context); message = part.message
+        }
+        return (contexts.joined(separator: "\n\n"), message)
+    }
+
+    private static func splitContextPass(_ text: String) -> (context: String, message: String) {
+        if text.hasPrefix("# Context from my IDE setup:"), let request = text.range(of: "## My request for Codex:") {
+            return (String(text[..<request.upperBound]), String(text[request.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        guard text.contains("<") else { return ("", text) }
+        let tags = ["environment_context", "user_instructions", "turn_aborted", "permissions instructions", "collaboration_mode", "app-context", "skills_instructions", "multi_agent_role", "multi_agent_mode", "subagent_notification"]
+        let names = tags.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
+        let pattern = "(?im)^[ \t]*(?:# AGENTS\\.md instructions for [^\\n]*\\n[\\s\\S]*?<INSTRUCTIONS>[\\s\\S]*?</INSTRUCTIONS>|<(" + names + ")(?:[ \t][^>]*)?>[\\s\\S]*?</\\1>)"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return ("", text) }
+        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        var context: [String] = []; var message = ""; var cursor = text.startIndex
+        for match in matches {
+            guard let range = Range(match.range, in: text) else { continue }
+            // Preserve fenced examples of protocol markup as authored conversation.
+            var fence: Character?
+            for line in text[..<range.lowerBound].split(separator: "\n", omittingEmptySubsequences: false) {
+                let line = line.trimmingCharacters(in: .whitespaces)
+                if line.hasPrefix("```") || line.hasPrefix("~~~") {
+                    let marker = line.first!
+                    if fence == marker { fence = nil } else if fence == nil { fence = marker }
                 }
             }
-            guard let closing, let end = rest.range(of: closing) else { break }
-            parts.append(String(rest[..<end.upperBound]))
-            rest = String(rest[end.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard fence == nil else { continue }
+            message += text[cursor..<range.lowerBound]; context.append(String(text[range]))
+            cursor = range.upperBound
         }
-        return (parts.joined(separator: "\n\n"), parts.isEmpty ? text : rest)
+        guard !context.isEmpty else { return ("", text) }
+        message += text[cursor...]
+        return (context.joined(separator: "\n\n"), message.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     static func title(_ text: String) -> String? {
@@ -40,7 +60,10 @@ enum ConversationSemantics {
         guard !clean.isEmpty else { return nil }
         // Extractive: use the actual request, never a tool result or generated summary.
         let lines = clean.split(whereSeparator: \.isNewline).map(String.init)
-        let line = lines.first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? clean
+        let line = lines.first(where: {
+            let heading = $0.trimmingCharacters(in: CharacterSet(charactersIn: "# :\t"))
+            return !heading.isEmpty && !["[Archived image]", "[Archived audio]", "My request for Codex", "User request", "Task"].contains(heading)
+        }) ?? clean
         let plain = line.replacingOccurrences(of: #"^\s*(?:#{1,6}\s+|[-*]\s+|\d+[.)]\s+)"#, with: "", options: .regularExpression)
         let compact = plain.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         guard !compact.isEmpty, compact != "[Archived image]" else { return nil }

@@ -25,6 +25,10 @@ public struct ArchiveItem: Identifiable, Sendable {
     public var category: RecordCategory = .unknown
     /// Adapter-only split of injected context from a mixed user input record.
     var contextText: String = ""
+    var unsupportedText: String = ""
+    public var messageID: String = ""
+    public var channel: String = ""
+    public var isDelta: Bool = false
     public var role: String = ""
     public var text: String = ""
     public var textLength: Int = 0

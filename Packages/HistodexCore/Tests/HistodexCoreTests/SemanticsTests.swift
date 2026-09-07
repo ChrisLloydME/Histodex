@@ -126,6 +126,10 @@ extension ArchiveTests {
                 ALTER TABLE conversations DROP COLUMN baseTitle;
                 ALTER TABLE conversations DROP COLUMN titleUpdatedAt;
                 DROP TABLE conversation_names;
+                ALTER TABLE items DROP COLUMN messageID;
+                ALTER TABLE items DROP COLUMN channel;
+                ALTER TABLE items DROP COLUMN isDelta;
+                DELETE FROM grdb_migrations WHERE identifier='archive-v4';
                 DELETE FROM grdb_migrations WHERE identifier='archive-v3';
                 """)
         }

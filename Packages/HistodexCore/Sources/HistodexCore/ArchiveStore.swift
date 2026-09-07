@@ -5,7 +5,7 @@ import GRDB
 public actor ArchiveStore {
     public nonisolated let root: URL
     private let database: DatabaseQueue
-    public static let schemaVersion = 3
+    public static let schemaVersion = 4
 
     public init(root: URL) throws {
         self.root = root.standardizedFileURL.resolvingSymlinksInPath()
@@ -79,6 +79,13 @@ public actor ArchiveStore {
                 );
                 """)
         }
+        migrator.registerMigration("archive-v4") { db in
+            try db.execute(sql: """
+                ALTER TABLE items ADD COLUMN messageID TEXT NOT NULL DEFAULT '';
+                ALTER TABLE items ADD COLUMN channel TEXT NOT NULL DEFAULT '';
+                ALTER TABLE items ADD COLUMN isDelta INTEGER NOT NULL DEFAULT 0;
+                """)
+        }
         try migrator.migrate(database)
     }
 
@@ -94,7 +101,7 @@ public actor ArchiveStore {
 
     public func items(conversationID: String, from ordinal: Int = 0, limit: Int = 100, scope: ArchiveScope = .allRecords) throws -> [ArchiveItem] {
         try database.read { db in
-            try Row.fetchAll(db, sql: "SELECT id,conversationID,ordinal,kind,category,role,substr(text,1,12000) AS text,length(text) AS textLength,timestamp,turnID,toolName,callID,sourceType,rawOffset,rawLength,rawPath,isDiagnostic FROM items WHERE conversationID = ? AND hidden = 0 AND ordinal >= ? AND \(scope.predicate) ORDER BY ordinal LIMIT ?",
+            try Row.fetchAll(db, sql: "SELECT id,conversationID,ordinal,kind,category,messageID,channel,isDelta,role,substr(text,1,12000) AS text,length(text) AS textLength,timestamp,turnID,toolName,callID,sourceType,rawOffset,rawLength,rawPath,isDiagnostic FROM items WHERE conversationID = ? AND hidden = 0 AND ordinal >= ? AND \(scope.predicate) ORDER BY ordinal LIMIT ?",
                              arguments: [conversationID, max(0, ordinal), min(200, max(1, limit))]).map { try Self.item($0, db: db) }
         }
     }
@@ -300,6 +307,12 @@ public actor ArchiveStore {
                                 context.contextText = ""; context.assets = []; context.ordinal = count
                                 try Self.insert(context, db: db); count += 1
                             }
+                            if !item.unsupportedText.isEmpty {
+                                var unsupported = item
+                                unsupported.kind = .unknown; unsupported.category = .unknown; unsupported.text = item.unsupportedText
+                                unsupported.assets = []; unsupported.ordinal = count
+                                try Self.insert(unsupported, db: db); count += 1
+                            }
                             item.ordinal = count
                             item.assets = item.assets.map { asset in
                                 if asset.hash == nil, let saved = preserved[asset.sourceReference], saved.sourceReference != "Inline image" { return saved }
@@ -348,10 +361,10 @@ public actor ArchiveStore {
         var mirrorKey: String?; var family: String?; var hidden = false
         if item.kind == .message || item.kind == .reasoning {
             family = item.sourceType.hasPrefix("response_item/") ? "response" : "event"
-            let signature = item.category.rawValue + "\u{0}" + item.kind.rawValue + "\u{0}" + item.role + "\u{0}" + item.text
+            let signature = item.category.rawValue + "\u{0}" + item.kind.rawValue + "\u{0}" + item.role + "\u{0}" + item.text.trimmingCharacters(in: .whitespacesAndNewlines)
             mirrorKey = SHA256.hash(data: Data(signature.utf8)).map { String(format: "%02x", $0) }.joined()
             // Pair only the most recent opposite representation, once. Repeated messages in the same family remain.
-            if let prior = try Row.fetchOne(db, sql: "SELECT id,mirrorFamily FROM items WHERE conversationID=? AND mirrorKey=? AND hidden=0 AND ordinal>=? AND (turnID=? OR turnID='' OR ?='') ORDER BY id DESC LIMIT 1", arguments: [item.conversationID, mirrorKey, max(0, item.ordinal - 32), item.turnID, item.turnID]),
+            if let prior = try Row.fetchOne(db, sql: "SELECT id,mirrorFamily FROM items WHERE conversationID=? AND mirrorKey=? AND hidden=0 AND ordinal>=? AND (turnID=? OR turnID='' OR ?='') AND (channel=? OR channel='' OR ?='') ORDER BY id DESC LIMIT 1", arguments: [item.conversationID, mirrorKey, max(0, item.ordinal - 32), item.turnID, item.turnID, item.channel, item.channel]),
                prior["mirrorFamily"] as String? != family {
                 // Mark the pair as consumed by clearing its key; keep the richer response representation.
                 let priorID: Int64 = prior["id"]
@@ -372,9 +385,9 @@ public actor ArchiveStore {
             }
         }
         try db.execute(sql: """
-            INSERT INTO items(conversationID,ordinal,kind,role,text,timestamp,turnID,toolName,callID,sourceType,rawOffset,rawLength,rawPath,isDiagnostic,mirrorKey,mirrorFamily,hidden,category)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, arguments: [item.conversationID, item.ordinal, item.kind.rawValue, item.role, item.text, item.timestamp, item.turnID, item.toolName, item.callID, item.sourceType, item.rawOffset, item.rawLength, item.rawPath, item.isDiagnostic, mirrorKey, family, hidden, item.category.rawValue])
+            INSERT INTO items(conversationID,ordinal,kind,role,text,timestamp,turnID,toolName,callID,sourceType,rawOffset,rawLength,rawPath,isDiagnostic,mirrorKey,mirrorFamily,hidden,category,messageID,channel,isDelta)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, arguments: [item.conversationID, item.ordinal, item.kind.rawValue, item.role, item.text, item.timestamp, item.turnID, item.toolName, item.callID, item.sourceType, item.rawOffset, item.rawLength, item.rawPath, item.isDiagnostic, mirrorKey, family, hidden, item.category.rawValue, item.messageID, item.channel, item.isDelta])
         let itemID = db.lastInsertedRowID
         for (position, asset) in item.assets.enumerated() {
             if let hash = asset.hash {
@@ -394,6 +407,7 @@ public actor ArchiveStore {
         var item = ArchiveItem()
         item.id = r["id"]; item.conversationID = r["conversationID"]; item.ordinal = r["ordinal"]
         item.category = RecordCategory(rawValue: r["category"]) ?? .unknown
+        item.messageID = r["messageID"]; item.channel = r["channel"]; item.isDelta = r["isDelta"]
         item.kind = ItemKind(rawValue: r["kind"]) ?? .unknown; item.role = r["role"]; item.text = r["text"]
         item.textLength = r["textLength"]; item.timestamp = r["timestamp"]; item.turnID = r["turnID"]; item.toolName = r["toolName"]; item.callID = r["callID"]
         item.sourceType = r["sourceType"]; item.rawOffset = r["rawOffset"]; item.rawLength = r["rawLength"]; item.rawPath = r["rawPath"]; item.isDiagnostic = r["isDiagnostic"]

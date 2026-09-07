@@ -6,11 +6,11 @@ public struct TranscriptEntry: Identifiable, Sendable {
     public let items: [ArchiveItem]
     public var id: Int64 { items[0].id }
     public var style: Style {
-        guard items.count == 1, items[0].kind == .message, items[0].category == .conversation else { return .activity }
+        guard items.allSatisfy({ $0.kind == .message && $0.category == .conversation && $0.role == items[0].role }) else { return .activity }
         switch items[0].role { case "user": return .outgoing; case "assistant": return .incoming; default: return .activity }
     }
     public var title: String {
-        if items.count > 1 { return "Session activity" }
+        if items.count > 1 && items[0].kind == .systemEvent { return "Session activity" }
         let item = items[0]
         if item.category == .context { return "Context and instructions" }
         switch item.kind {
@@ -44,7 +44,18 @@ public struct TranscriptEntry: Identifiable, Sendable {
         return String(Self.readableText(item).split(whereSeparator: \.isNewline).first?.prefix(180) ?? "")
     }
     public var body: String {
-        items.map { item in
+        if items.count > 1, items[0].kind != .systemEvent {
+            var result = ""
+            for item in items {
+                let text = Self.readableText(item)
+                // A complete snapshot following deltas replaces, rather than repeats,
+                // the accumulated message. Independent messages are never coalesced.
+                if !item.isDelta && text.hasPrefix(result) { result = text }
+                else { result += text }
+            }
+            return result
+        }
+        return items.map { item in
             let text = Self.readableText(item)
             return items.count == 1 ? text : Self.eventSummary(item) + "\n" + text
         }.joined(separator: "\n\n")
@@ -59,13 +70,26 @@ public struct TranscriptEntry: Identifiable, Sendable {
         var rows: [TranscriptEntry] = []
         for item in items {
             let bookkeeping = item.kind == .systemEvent && !item.isDiagnostic && item.assets.isEmpty
-            if bookkeeping, let last = rows.last, last.items.allSatisfy({ $0.kind == .systemEvent && !$0.isDiagnostic && $0.assets.isEmpty }),
+            if let last = rows.last, let previous = last.items.last, canJoin(previous, item) {
+                rows[rows.count - 1] = TranscriptEntry(items: last.items + [item])
+            } else if bookkeeping, let last = rows.last, last.items.allSatisfy({ $0.kind == .systemEvent && !$0.isDiagnostic && $0.assets.isEmpty }),
                last.items[0].timestamp.prefix(10) == item.timestamp.prefix(10) {
                 rows[rows.count - 1] = TranscriptEntry(items: last.items + [item])
             } else { rows.append(TranscriptEntry(items: [item])) }
         }
         return rows
     }
+    private static func canJoin(_ previous: ArchiveItem, _ next: ArchiveItem) -> Bool {
+        guard previous.kind == next.kind, previous.category == next.category,
+              previous.role == next.role, previous.channel == next.channel,
+              previous.turnID == next.turnID,
+              (next.kind == .message && next.role == "assistant") || [.toolResult, .commandOutput].contains(next.kind) else { return false }
+        if !previous.messageID.isEmpty || !next.messageID.isEmpty {
+            return !previous.messageID.isEmpty && previous.messageID == next.messageID && (previous.isDelta || next.isDelta)
+        }
+        return previous.isDelta && next.isDelta && previous.toolName == next.toolName && previous.callID == next.callID
+    }
+
     public static func readableText(_ item: ArchiveItem) -> String {
         guard item.kind != .message && item.kind != .reasoning,
               let data = item.text.data(using: .utf8), let value = try? JSONDecoder().decode(JSONValue.self, from: data) else { return item.text }
@@ -74,11 +98,7 @@ public struct TranscriptEntry: Identifiable, Sendable {
             let text = command.string.isEmpty ? command.array.map(\.string).joined(separator: " ") : command.string
             if !text.isEmpty { return text }
         }
-        if item.kind == .toolResult || item.kind == .commandOutput {
-            for key in ["aggregated_output", "output", "stdout", "text"] where !value[key].string.isEmpty { return value[key].string }
-            let text = value["content"].array.compactMap { v -> String? in let text = v["text"].string; return text.isEmpty ? nil : text }.joined(separator: "\n")
-            if !text.isEmpty { return text }
-        }
+        if item.kind == .toolResult || item.kind == .commandOutput { return CodexContent.output(value) }
         // Label normalized fields for humans; literal archived JSON remains in the detail view.
         if !value.object.isEmpty {
             return value.object.keys.sorted().filter { $0 != "type" }.map { key in
