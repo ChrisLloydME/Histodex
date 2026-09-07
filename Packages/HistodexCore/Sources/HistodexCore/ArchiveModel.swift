@@ -22,6 +22,9 @@ public struct ArchiveItem: Identifiable, Sendable {
     public var conversationID: String = ""
     public var ordinal: Int = 0
     public var kind: ItemKind = .unknown
+    public var category: RecordCategory = .unknown
+    /// Adapter-only split of injected context from a mixed user input record.
+    var contextText: String = ""
     public var role: String = ""
     public var text: String = ""
     public var textLength: Int = 0

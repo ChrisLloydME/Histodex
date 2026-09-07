@@ -4,7 +4,7 @@ import AppKit
 
 final class PresentationTests: XCTestCase {
     private func item(_ id: Int64, kind: ItemKind, role: String = "", text: String = "") -> ArchiveItem {
-        var item = ArchiveItem(); item.id = id; item.ordinal = Int(id); item.kind = kind; item.role = role; item.text = text; item.textLength = text.count; item.timestamp = "2026-09-06T10:00:00Z"; return item
+        var item = ArchiveItem(); item.id = id; item.ordinal = Int(id); item.kind = kind; item.category = kind == .message && ["user", "assistant"].contains(role) ? .conversation : .unknown; item.role = role; item.text = text; item.textLength = text.count; item.timestamp = "2026-09-06T10:00:00Z"; return item
     }
     func testOnlyRoutineBookkeepingIsGrouped() {
         let metadata = item(1, kind: .systemEvent)

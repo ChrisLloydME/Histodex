@@ -5,7 +5,7 @@ import GRDB
 public actor ArchiveStore {
     public nonisolated let root: URL
     private let database: DatabaseQueue
-    public static let schemaVersion = 2
+    public static let schemaVersion = 3
 
     public init(root: URL) throws {
         self.root = root.standardizedFileURL.resolvingSymlinksInPath()
@@ -67,22 +67,34 @@ public actor ArchiveStore {
                 INSERT INTO snapshot_sources SELECT id,sourcePath FROM snapshots;
                 """)
         }
+        migrator.registerMigration("archive-v3") { db in
+            try db.execute(sql: """
+                ALTER TABLE items ADD COLUMN category TEXT NOT NULL DEFAULT 'unknown';
+                CREATE INDEX item_category_order ON items(conversationID,category,hidden,ordinal);
+                ALTER TABLE conversations ADD COLUMN baseTitle TEXT NOT NULL DEFAULT '';
+                ALTER TABLE conversations ADD COLUMN titleUpdatedAt TEXT NOT NULL DEFAULT '';
+                CREATE TABLE conversation_names (
+                    id TEXT PRIMARY KEY, title TEXT NOT NULL, updatedAt TEXT NOT NULL,
+                    rawPath TEXT NOT NULL, rawOffset INTEGER NOT NULL
+                );
+                """)
+        }
         try migrator.migrate(database)
     }
 
     public func conversations(filter: String = "") throws -> [Conversation] {
         try database.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT conversations.*, coalesce((SELECT substr(text,1,180) FROM items WHERE conversationID=conversations.id AND hidden=0 AND kind='message' AND role IN ('user','assistant') ORDER BY ordinal DESC LIMIT 1),'') AS preview FROM conversations WHERE ? = '' OR instr(lower(title || ' ' || project || ' ' || startedAt), lower(?)) > 0
+                SELECT conversations.*, coalesce((SELECT substr(text,1,180) FROM items WHERE conversationID=conversations.id AND hidden=0 AND category='conversation' AND kind='message' AND role IN ('user','assistant') ORDER BY ordinal DESC LIMIT 1),'') AS preview FROM conversations WHERE ? = '' OR instr(lower(title || ' ' || project || ' ' || startedAt), lower(?)) > 0
                 ORDER BY updatedAt DESC, id LIMIT 10000
                 """, arguments: [filter, filter])
             return rows.map(Self.conversation)
         }
     }
 
-    public func items(conversationID: String, from ordinal: Int = 0, limit: Int = 100) throws -> [ArchiveItem] {
+    public func items(conversationID: String, from ordinal: Int = 0, limit: Int = 100, scope: ArchiveScope = .allRecords) throws -> [ArchiveItem] {
         try database.read { db in
-            try Row.fetchAll(db, sql: "SELECT id,conversationID,ordinal,kind,role,substr(text,1,12000) AS text,length(text) AS textLength,timestamp,turnID,toolName,callID,sourceType,rawOffset,rawLength,rawPath,isDiagnostic FROM items WHERE conversationID = ? AND hidden = 0 AND ordinal >= ? ORDER BY ordinal LIMIT ?",
+            try Row.fetchAll(db, sql: "SELECT id,conversationID,ordinal,kind,category,role,substr(text,1,12000) AS text,length(text) AS textLength,timestamp,turnID,toolName,callID,sourceType,rawOffset,rawLength,rawPath,isDiagnostic FROM items WHERE conversationID = ? AND hidden = 0 AND ordinal >= ? AND \(scope.predicate) ORDER BY ordinal LIMIT ?",
                              arguments: [conversationID, max(0, ordinal), min(200, max(1, limit))]).map { try Self.item($0, db: db) }
         }
     }
@@ -93,13 +105,13 @@ public actor ArchiveStore {
         }
     }
 
-    public func precedingPageStart(conversationID: String, before ordinal: Int, limit: Int = 100) throws -> Int {
+    public func precedingPageStart(conversationID: String, before ordinal: Int, limit: Int = 100, scope: ArchiveScope = .allRecords) throws -> Int {
         try database.read { db in
-            try Int.fetchOne(db, sql: "SELECT min(ordinal) FROM (SELECT ordinal FROM items WHERE conversationID = ? AND hidden = 0 AND ordinal < ? ORDER BY ordinal DESC LIMIT ?)", arguments: [conversationID, ordinal, min(200, max(1, limit))]) ?? 0
+            try Int.fetchOne(db, sql: "SELECT min(ordinal) FROM (SELECT ordinal FROM items WHERE conversationID = ? AND hidden = 0 AND ordinal < ? AND \(scope.predicate) ORDER BY ordinal DESC LIMIT ?)", arguments: [conversationID, ordinal, min(200, max(1, limit))]) ?? 0
         }
     }
 
-    public func search(_ query: String, limit: Int = 100) throws -> [SearchHit] {
+    public func search(_ query: String, limit: Int = 100, scope: ArchiveScope = .allRecords) throws -> [SearchHit] {
         let words = query.split(whereSeparator: \.isWhitespace)
         guard !words.isEmpty else { return [] }
         // User input is literal FTS terms, never an executable FTS expression.
@@ -108,7 +120,7 @@ public actor ArchiveStore {
             try Row.fetchAll(db, sql: """
                 SELECT i.id,i.conversationID,i.ordinal,c.title,snippet(item_search,0,'','', ' … ',24) AS excerpt
                 FROM item_search JOIN items i ON i.id=item_search.rowid JOIN conversations c ON c.id=i.conversationID
-                WHERE item_search MATCH ? AND i.hidden=0 ORDER BY rank LIMIT ?
+                WHERE item_search MATCH ? AND i.hidden=0 AND \(scope.predicate) ORDER BY rank LIMIT ?
                 """, arguments: [pattern, min(500, max(1, limit))]).map {
                     SearchHit(id: $0["id"], conversationID: $0["conversationID"], title: $0["title"], ordinal: $0["ordinal"], snippet: $0["excerpt"])
                 }
@@ -135,6 +147,15 @@ public actor ArchiveStore {
         guard !files.isEmpty else { throw ArchiveError.invalidSource("No rollout files were found under sessions/ or archived_sessions/ in the selected folder.") }
         let snapshots = try SnapshotStore(root: root)
         var report = ImportReport()
+        // Preserve the append-only name index before interpreting it, just like rollouts.
+        let index = source.root.appendingPathComponent("session_index.jsonl")
+        if FileManager.default.fileExists(atPath: index.path) {
+            do {
+                let copy = try snapshots.snapshot(source: source, file: SourceFile(url: index, relativePath: "session_index.jsonl"))
+                try importNames(copy)
+            } catch is CancellationError { throw CancellationError() }
+            catch { report.errors.append("session_index.jsonl: \(error.localizedDescription)") }
+        }
         var captured: [Snapshot] = []
         for (index, file) in files.enumerated() {
             try Task.checkCancellation()
@@ -153,14 +174,15 @@ public actor ArchiveStore {
             } catch is CancellationError { throw CancellationError() }
             catch { report.errors.append("\(snapshot.sourcePath): \(error.localizedDescription)") }
         }
+        try applyNames()
         progress?(ImportProgress(completed: files.count * 2, total: files.count * 2, filename: ""))
         return report
     }
 
     /// Rebuild normalized data from owned raw snapshots, without requiring the original Codex folder.
-    public func reparseArchive() throws -> ImportReport {
+    public func reparseArchive(onlyOutdated: Bool = false) throws -> ImportReport {
         let snapshots: [Snapshot] = try database.read { db in
-            try Row.fetchAll(db, sql: "SELECT s.* FROM snapshots s JOIN conversations c ON c.snapshotID=s.id ORDER BY s.importedAt").map {
+            try Row.fetchAll(db, sql: "SELECT s.* FROM snapshots s JOIN conversations c ON c.snapshotID=s.id WHERE (? = 0 OR s.parserVersion < ?) ORDER BY s.importedAt", arguments: [onlyOutdated, CodexAdapter.version]).map {
                 Snapshot(id: $0["id"], rawPath: $0["rawPath"], parsePath: $0["parsePath"], byteSize: UInt64($0["byteSize"] as Int64), sourcePath: $0["sourcePath"])
             }
         }
@@ -169,9 +191,42 @@ public actor ArchiveStore {
         for snapshot in snapshots {
             try Task.checkCancellation()
             do { _ = try importSnapshot(snapshot, sourceRoot: root, known: known, force: true); report.imported += 1 }
+            catch is CancellationError { throw CancellationError() }
             catch { report.errors.append("\(snapshot.sourcePath): \(error.localizedDescription)") }
         }
+        try applyNames()
         return report
+    }
+
+    private func importNames(_ snapshot: Snapshot) throws {
+        try database.write { db in
+            // Codex defines this as append-only: the last valid entry for an ID wins,
+            // even when two entries have equal timestamps. Retain exact provenance.
+            try JSONLReader().read(root.appendingPathComponent(snapshot.parsePath)) { line in
+                guard let data = line.data, let row = try? JSONDecoder().decode(JSONValue.self, from: data),
+                      !row["id"].string.isEmpty,
+                      let title = ConversationSemantics.explicitTitle(row["thread_name"].string) else { return }
+                try db.execute(sql: "INSERT OR REPLACE INTO conversation_names VALUES(?,?,?,?,?)",
+                               arguments: [row["id"].string, title, row["updated_at"].string, snapshot.parsePath, line.offset])
+            }
+        }
+    }
+
+    private func applyNames() throws {
+        try database.write { db in
+            let iso = ISO8601DateFormatter()
+            let fractional = ISO8601DateFormatter(); fractional.formatOptions.insert(.withFractionalSeconds)
+            func date(_ value: String) -> Date? { fractional.date(from: value) ?? iso.date(from: value) }
+            for row in try Row.fetchAll(db, sql: "SELECT c.id,c.baseTitle,c.titleUpdatedAt,n.title,n.updatedAt FROM conversations c LEFT JOIN conversation_names n ON n.id=c.id") {
+                var title: String = row["baseTitle"]
+                if let name: String = row["title"] {
+                    let eventDate = date(row["titleUpdatedAt"])
+                    let indexDate = date(row["updatedAt"])
+                    if eventDate == nil || indexDate == nil || indexDate! >= eventDate! { title = name }
+                }
+                if !title.isEmpty { try db.execute(sql: "UPDATE conversations SET title=? WHERE id=?", arguments: [title, row["id"] as String]) }
+            }
+        }
     }
 
     private func knownSnapshots() throws -> [Snapshot] {
@@ -227,7 +282,9 @@ public actor ArchiveStore {
                 let assetStore = AssetStore(root: root, sourceRoot: sourceRoot, preserved: preserved, archiveOnly: force)
                 enum PrefixEnd: Error { case reached }
                 for segment in plan.segments {
+                    adapter.acceptsTitle = segment.snapshot.id == snapshot.id
                     let segmentMetadata = try resolver.metadata(segment.snapshot)
+                    adapter.recordThreadID = segmentMetadata.sourceID
                     if !segmentMetadata.project.isEmpty { adapter.metadata.project = segmentMetadata.project }
                     do {
                         try JSONLReader().read(root.appendingPathComponent(segment.snapshot.parsePath)) { line in
@@ -236,7 +293,14 @@ public actor ArchiveStore {
                                let raw = try? JSONDecoder().decode(JSONValue.self, from: data),
                                let ordinal = raw["ordinal"].integer, ordinal >= end { throw PrefixEnd.reached }
                             var item = adapter.normalize(line, rawPath: segment.snapshot.parsePath, assetStore: assetStore)
-                            item.conversationID = identity; item.ordinal = count
+                            item.conversationID = identity
+                            if !item.contextText.isEmpty {
+                                var context = item
+                                context.kind = .message; context.category = .context; context.text = item.contextText
+                                context.contextText = ""; context.assets = []; context.ordinal = count
+                                try Self.insert(context, db: db); count += 1
+                            }
+                            item.ordinal = count
                             item.assets = item.assets.map { asset in
                                 if asset.hash == nil, let saved = preserved[asset.sourceReference], saved.sourceReference != "Inline image" { return saved }
                                 return asset
@@ -250,16 +314,16 @@ public actor ArchiveStore {
                 for text in plan.warnings {
                     var warning = ArchiveItem()
                     warning.conversationID = identity; warning.ordinal = count; warning.kind = .systemEvent
-                    warning.isDiagnostic = true; warning.sourceType = "inherited_history"
+                    warning.category = .metadata; warning.isDiagnostic = true; warning.sourceType = "inherited_history"
                     warning.text = text; warning.rawPath = snapshot.parsePath
                     try Self.insert(warning, db: db); warnings += 1; count += 1
                 }
-                let visible = try Int.fetchOne(db, sql: "SELECT count(*) FROM items WHERE conversationID=? AND hidden=0", arguments: [identity]) ?? count
+                let visible = try Int.fetchOne(db, sql: "SELECT count(*) FROM items WHERE conversationID=? AND hidden=0 AND category='conversation'", arguments: [identity]) ?? count
                 let meta = adapter.metadata
                 if !force && !currentDate.isEmpty && !meta.updatedAt.isEmpty && meta.updatedAt < currentDate { throw ProjectionOutcome.older }
                 try db.execute(sql: """
-                    UPDATE conversations SET title=?,project=?,startedAt=?,updatedAt=?,itemCount=?,warningCount=?,snapshotID=? WHERE id=?
-                    """, arguments: [meta.title.isEmpty ? "Untitled conversation" : meta.title, meta.project, meta.startedAt, meta.updatedAt, visible, warnings, snapshot.id, identity])
+                    UPDATE conversations SET title=?,baseTitle=?,titleUpdatedAt=?,project=?,startedAt=?,updatedAt=?,itemCount=?,warningCount=?,snapshotID=? WHERE id=?
+                    """, arguments: [meta.title.isEmpty ? "Conversation " + String(identity.prefix(8)) : meta.title, meta.title.isEmpty ? "Conversation " + String(identity.prefix(8)) : meta.title, meta.titleUpdatedAt, meta.project, meta.startedAt, meta.updatedAt, visible, warnings, snapshot.id, identity])
                 try db.execute(sql: "UPDATE snapshots SET status='complete',parserVersion=?,error=NULL WHERE id=?", arguments: [CodexAdapter.version, snapshot.id])
             }
             return true
@@ -284,7 +348,7 @@ public actor ArchiveStore {
         var mirrorKey: String?; var family: String?; var hidden = false
         if item.kind == .message || item.kind == .reasoning {
             family = item.sourceType.hasPrefix("response_item/") ? "response" : "event"
-            let signature = item.kind.rawValue + "\u{0}" + item.role + "\u{0}" + item.text
+            let signature = item.category.rawValue + "\u{0}" + item.kind.rawValue + "\u{0}" + item.role + "\u{0}" + item.text
             mirrorKey = SHA256.hash(data: Data(signature.utf8)).map { String(format: "%02x", $0) }.joined()
             // Pair only the most recent opposite representation, once. Repeated messages in the same family remain.
             if let prior = try Row.fetchOne(db, sql: "SELECT id,mirrorFamily FROM items WHERE conversationID=? AND mirrorKey=? AND hidden=0 AND ordinal>=? AND (turnID=? OR turnID='' OR ?='') ORDER BY id DESC LIMIT 1", arguments: [item.conversationID, mirrorKey, max(0, item.ordinal - 32), item.turnID, item.turnID]),
@@ -308,9 +372,9 @@ public actor ArchiveStore {
             }
         }
         try db.execute(sql: """
-            INSERT INTO items(conversationID,ordinal,kind,role,text,timestamp,turnID,toolName,callID,sourceType,rawOffset,rawLength,rawPath,isDiagnostic,mirrorKey,mirrorFamily,hidden)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, arguments: [item.conversationID, item.ordinal, item.kind.rawValue, item.role, item.text, item.timestamp, item.turnID, item.toolName, item.callID, item.sourceType, item.rawOffset, item.rawLength, item.rawPath, item.isDiagnostic, mirrorKey, family, hidden])
+            INSERT INTO items(conversationID,ordinal,kind,role,text,timestamp,turnID,toolName,callID,sourceType,rawOffset,rawLength,rawPath,isDiagnostic,mirrorKey,mirrorFamily,hidden,category)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, arguments: [item.conversationID, item.ordinal, item.kind.rawValue, item.role, item.text, item.timestamp, item.turnID, item.toolName, item.callID, item.sourceType, item.rawOffset, item.rawLength, item.rawPath, item.isDiagnostic, mirrorKey, family, hidden, item.category.rawValue])
         let itemID = db.lastInsertedRowID
         for (position, asset) in item.assets.enumerated() {
             if let hash = asset.hash {
@@ -329,6 +393,7 @@ public actor ArchiveStore {
     private static func item(_ r: Row, db: Database) throws -> ArchiveItem {
         var item = ArchiveItem()
         item.id = r["id"]; item.conversationID = r["conversationID"]; item.ordinal = r["ordinal"]
+        item.category = RecordCategory(rawValue: r["category"]) ?? .unknown
         item.kind = ItemKind(rawValue: r["kind"]) ?? .unknown; item.role = r["role"]; item.text = r["text"]
         item.textLength = r["textLength"]; item.timestamp = r["timestamp"]; item.turnID = r["turnID"]; item.toolName = r["toolName"]; item.callID = r["callID"]
         item.sourceType = r["sourceType"]; item.rawOffset = r["rawOffset"]; item.rawLength = r["rawLength"]; item.rawPath = r["rawPath"]; item.isDiagnostic = r["isDiagnostic"]

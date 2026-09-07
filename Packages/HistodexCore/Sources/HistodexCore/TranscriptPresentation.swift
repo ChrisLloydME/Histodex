@@ -6,12 +6,13 @@ public struct TranscriptEntry: Identifiable, Sendable {
     public let items: [ArchiveItem]
     public var id: Int64 { items[0].id }
     public var style: Style {
-        guard items.count == 1, items[0].kind == .message else { return .activity }
+        guard items.count == 1, items[0].kind == .message, items[0].category == .conversation else { return .activity }
         switch items[0].role { case "user": return .outgoing; case "assistant": return .incoming; default: return .activity }
     }
     public var title: String {
         if items.count > 1 { return "Session activity" }
         let item = items[0]
+        if item.category == .context { return "Context and instructions" }
         switch item.kind {
         case .message: return item.role == "user" ? "You" : item.role == "assistant" ? "Codex" : "Instructions"
         case .reasoning: return "Reasoning"

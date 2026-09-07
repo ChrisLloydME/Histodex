@@ -3,6 +3,8 @@ import Foundation
 struct SessionMetadata {
     var sourceID = ""
     var title = ""
+    var titleUpdatedAt = ""
+    var hasExplicitTitle = false
     var project = ""
     var startedAt = ""
     var updatedAt = ""
@@ -12,9 +14,12 @@ struct SessionMetadata {
 }
 
 struct CodexAdapter {
-    static let version = 2
+    static let version = 3
     var metadata = SessionMetadata()
     var turnID = ""
+    var acceptsTitle = true
+    var recordThreadID = ""
+    private var ownsTitle: Bool { acceptsTitle && (recordThreadID.isEmpty || recordThreadID == metadata.sourceID) }
 
     mutating func normalize(_ line: RawLine, rawPath: String, assetStore: AssetStore) -> ArchiveItem {
         var item = ArchiveItem()
@@ -52,6 +57,7 @@ struct CodexAdapter {
         }
         switch type {
         case "session_meta":
+            recordThreadID = p["id"].string
             if metadata.sourceID.isEmpty {
                 metadata.sourceID = p["id"].string; metadata.project = p["cwd"].string
                 metadata.startedAt = p["timestamp"].string.isEmpty ? item.timestamp : p["timestamp"].string
@@ -67,9 +73,12 @@ struct CodexAdapter {
             if !p["replacement_history"].array.isEmpty { item.text += "\nReplacement model context is preserved in the raw record." }
         case "response_item":
             switch subtype {
-            case "message", "agent_message":
+            case "message":
                 item.kind = .message; item.role = p["role"].string.isEmpty ? p["author"].string : p["role"].string
                 item.text = content(clean["content"])
+            case "agent_message":
+                item.role = p["author"].string; item.text = content(clean["content"])
+                item.category = .context
             case "reasoning":
                 item.kind = .reasoning; item.role = "assistant"
                 item.text = content(clean["summary"])
@@ -105,15 +114,39 @@ struct CodexAdapter {
             case "mcp_tool_call_begin", "mcp_tool_call_end": item.kind = subtype.hasSuffix("end") ? .toolResult : .toolCall; item.text = clean.pretty
             case "image_generation_end": item.kind = .generatedImage; item.text = p["revised_prompt"].string
             case "thread_name_updated":
-                metadata.title = p["thread_name"].string; item.kind = .systemEvent; item.text = "Renamed conversation: " + metadata.title
+                if ownsTitle, p["thread_id"].string.isEmpty || p["thread_id"].string == metadata.sourceID,
+                   let title = ConversationSemantics.explicitTitle(p["thread_name"].string) {
+                    metadata.title = title; metadata.hasExplicitTitle = true; metadata.titleUpdatedAt = item.timestamp
+                }
+                item.kind = .systemEvent; item.text = "Renamed conversation: " + p["thread_name"].string
             case "task_started", "task_complete", "turn_aborted", "token_count", "context_compacted", "thread_settings_applied":
                 item.kind = .systemEvent; item.text = clean.pretty
             default: item.text = clean.pretty
             }
         default: item.text = raw.withoutImageBodies.pretty
         }
-        if item.kind == .message && item.role == "user" && metadata.title.isEmpty {
-            metadata.title = String(item.text.split(separator: "\n").first.map(String.init)?.prefix(120) ?? "Untitled conversation")
+        if item.kind == .message {
+            item.category = ["user", "assistant"].contains(item.role) ? .conversation : .context
+            if item.role == "assistant", !p["recipient"].string.isEmpty, p["recipient"].string != "all" { item.category = .activity }
+            if item.role == "user" {
+                let split = ConversationSemantics.separateContext(item.text)
+                if p["kind"].string == "environment_context" {
+                    item.category = .context
+                } else if !split.context.isEmpty {
+                    if split.message.isEmpty { item.category = .context }
+                    else { item.contextText = split.context; item.text = split.message }
+                }
+                if ownsTitle, item.category == .conversation, !metadata.hasExplicitTitle,
+                   metadata.title.isEmpty || ConversationSemantics.isGenericTitle(metadata.title),
+                   let title = ConversationSemantics.title(item.text) { metadata.title = title }
+            }
+        } else if item.category != .context {
+            switch item.kind {
+            case .image, .generatedImage: item.category = .conversation
+            case .systemEvent: item.category = .metadata
+            case .unknown: item.category = .unknown
+            default: item.category = .activity
+            }
         }
         if item.text.isEmpty { item.text = item.assets.isEmpty ? "No readable content. Original record preserved." : "Archived image" }
         return item
