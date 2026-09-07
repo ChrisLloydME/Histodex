@@ -14,10 +14,12 @@ struct SessionMetadata {
 }
 
 struct CodexAdapter {
-    static let version = 4
+    static let version = 5
     var metadata = SessionMetadata()
     var turnID = ""
     var acceptsTitle = true
+    private var titleRecordCount = 0
+    private var titles = CodexTitleCandidates()
     var recordThreadID = ""
     private var ownsTitle: Bool { acceptsTitle && (recordThreadID.isEmpty || recordThreadID == metadata.sourceID) }
 
@@ -163,9 +165,7 @@ struct CodexAdapter {
                     if split.message.isEmpty { item.category = .context }
                     else { item.contextText = split.context; item.text = split.message }
                 }
-                if ownsTitle, item.category == .conversation, !metadata.hasExplicitTitle,
-                   metadata.title.isEmpty || ConversationSemantics.isGenericTitle(metadata.title),
-                   let title = ConversationSemantics.title(item.text) { metadata.title = title }
+
             }
         } else if item.category != .context {
             switch item.kind {
@@ -174,6 +174,10 @@ struct CodexAdapter {
             case .unknown: item.category = .unknown
             default: item.category = .activity
             }
+        }
+        if ownsTitle {
+            titleRecordCount += 1; titles.consider(item, record: titleRecordCount)
+            if !metadata.hasExplicitTitle { metadata.title = titles.value }
         }
         if item.kind == .message, item.text.isEmpty, item.assets.isEmpty {
             item.category = .unknown

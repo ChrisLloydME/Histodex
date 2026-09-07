@@ -51,8 +51,8 @@ extension ArchiveTests {
         let mixed = ConversationSemantics.separateContext("<environment_context>x</environment_context>\n<user_instructions>y</user_instructions>\nActual request")
         XCTAssertEqual(mixed.message, "Actual request")
         XCTAssertTrue(mixed.context.contains("<user_instructions>"))
-        XCTAssertEqual(ConversationSemantics.title("# Repair conversation titles\nDetails"), "Repair conversation titles")
-        XCTAssertTrue(ConversationSemantics.title(String(repeating: "请求", count: 100))!.hasSuffix("…"))
+        XCTAssertEqual(ConversationSemantics.title("# Repair conversation titles\nDetails"), "Repair conversation titles Details")
+        XCTAssertTrue(ConversationSemantics.title(String(repeating: "请求", count: 1000))!.hasSuffix("…"))
     }
 
     func testIndexNamesUpdateWithoutRolloutChangesAndRemainIndependent() async throws {
@@ -99,14 +99,14 @@ extension ArchiveTests {
         XCTAssertEqual(conversations.first { $0.id == parentID }?.title, "Parent name")
     }
 
-    func testNewerRenameEventOutranksStaleIndex() async throws {
+    func testIndexCustomTitleHasAgentSessionsPrecedenceOverRuntimeRename() async throws {
         let work = try workspace()
         _ = try source(work, metadata() + message("Fallback") + record("event_msg", ["type": "thread_name_updated", "thread_id": "test-session", "thread_name": "Current rename"]))
-        try Data("{\"id\":\"test-session\",\"thread_name\":\"Stale index\",\"updated_at\":\"2026-09-05T10:00:00Z\"}\n".utf8).write(to: work.appendingPathComponent("codex/session_index.jsonl"))
+        try Data("{\"id\":\"test-session\",\"thread_name\":\"User-saved name\",\"updated_at\":\"2026-09-05T10:00:00Z\"}\n".utf8).write(to: work.appendingPathComponent("codex/session_index.jsonl"))
         let store = try ArchiveStore(root: work.appendingPathComponent("archive"))
         _ = try await store.importDirectory(work.appendingPathComponent("codex"))
         let conversations = try await store.conversations()
-        XCTAssertEqual(conversations.first?.title, "Current rename")
+        XCTAssertEqual(conversations.first?.title, "User-saved name")
     }
 
     func testOutdatedArchiveRepairUsesOwnedSnapshotsAndIsIdempotent() async throws {
@@ -130,6 +130,9 @@ extension ArchiveTests {
                 ALTER TABLE items DROP COLUMN channel;
                 ALTER TABLE items DROP COLUMN isDelta;
                 DELETE FROM grdb_migrations WHERE identifier='archive-v4';
+                DROP TABLE source_revisions;
+                DROP TABLE state_names;
+                DELETE FROM grdb_migrations WHERE identifier='archive-v5';
                 DELETE FROM grdb_migrations WHERE identifier='archive-v3';
                 """)
         }

@@ -38,6 +38,12 @@ public struct CodexSource: Sendable {
         }
         return files.sorted { $0.relativePath < $1.relativePath }
     }
+    func fingerprint(_ file: SourceFile) throws -> String {
+        let handle = try open(file); defer { try? handle.close() }
+        var info = stat()
+        guard fstat(handle.fileDescriptor, &info) == 0 else { throw POSIXError(.EIO) }
+        return "\(info.st_dev):\(info.st_ino):\(info.st_size):\(info.st_mtimespec.tv_sec):\(info.st_mtimespec.tv_nsec):\(info.st_ctimespec.tv_sec):\(info.st_ctimespec.tv_nsec)"
+    }
     func open(_ file: SourceFile) throws -> FileHandle {
         guard file.url.resolvingSymlinksInPath().path.hasPrefix(root.path + "/") else {
             throw ArchiveError.invalidSource("Source path escaped the selected folder.")
@@ -69,27 +75,30 @@ struct SnapshotStore {
             try FileManager.default.createDirectory(at: root.appendingPathComponent(p), withIntermediateDirectories: true)
         }
     }
-    func snapshot(source: CodexSource, file: SourceFile) throws -> Snapshot {
+    func snapshot(source: CodexSource, file: SourceFile, progress: ((Int64, Int64) -> Void)? = nil) throws -> Snapshot {
         let input = try source.open(file); defer { try? input.close() }
         let size = try input.seekToEnd(); try input.seek(toOffset: 0)
         let staging = root.appendingPathComponent("staging/\(UUID().uuidString)")
         FileManager.default.createFile(atPath: staging.path, contents: nil)
         defer { try? FileManager.default.removeItem(at: staging) }
         let output = try FileHandle(forWritingTo: staging); defer { try? output.close() }
-        var remaining = size; var hash = SHA256()
+        var remaining = size; var hash = SHA256(); var lastProgress = Date.distantPast
+        progress?(0, Int64(size))
         while remaining > 0 {
             try Task.checkCancellation()
             let data = try input.read(upToCount: Int(min(remaining, 256 * 1024))) ?? Data()
             guard !data.isEmpty else { throw ArchiveError.truncatedSource }
             remaining -= UInt64(data.count); hash.update(data: data); try output.write(contentsOf: data)
+            if Date().timeIntervalSince(lastProgress) >= 0.1 || remaining == 0 { progress?(Int64(size - remaining), Int64(size)); lastProgress = Date() }
         }
         try output.synchronize(); try output.close()
         let id = hash.finalize().map { String(format: "%02x", $0) }.joined()
         let compressed = file.url.path.hasSuffix(".zst")
-        let raw = "raw/\(id).jsonl" + (compressed ? ".zst" : "")
+        let suffix = file.url.lastPathComponent.hasSuffix(".sqlite-wal") ? ".sqlite-wal" : file.url.pathExtension == "sqlite" ? ".sqlite" : ".jsonl"
+        let raw = "raw/\(id)" + suffix + (compressed ? ".zst" : "")
         let rawURL = root.appendingPathComponent(raw)
         if !FileManager.default.fileExists(atPath: rawURL.path) { try FileManager.default.moveItem(at: staging, to: rawURL) }
-        let parse = "raw/\(id).jsonl"
+        let parse = compressed ? "raw/\(id).jsonl" : raw
         if compressed, !FileManager.default.fileExists(atPath: root.appendingPathComponent(parse).path) {
             try decompress(rawURL, to: root.appendingPathComponent(parse))
         }

@@ -68,6 +68,23 @@ public struct ImportProgress: Sendable {
     public let completed: Int
     public let total: Int
     public let filename: String
+    public var phase: String = "Indexing"
+    public var processedBytes: Int64 = 0
+    public var totalBytes: Int64 = 0
+    public init(completed: Int, total: Int, filename: String, phase: String = "Indexing", processedBytes: Int64 = 0, totalBytes: Int64 = 0) {
+        self.completed = completed; self.total = total; self.filename = filename; self.phase = phase
+        self.processedBytes = processedBytes; self.totalBytes = totalBytes
+    }
+    public var fraction: Double? {
+        guard total > 0 else { return nil }
+        let fileFraction = totalBytes > 0 ? min(1, Double(processedBytes) / Double(totalBytes)) : 0
+        return min(1, (Double(completed) + fileFraction) / Double(total))
+    }
+    public var description: String {
+        let count = total > 0 ? " · \(min(completed + 1, total)) of \(total)" : ""
+        let bytes = totalBytes > 0 ? " · \(ByteCountFormatter.string(fromByteCount: processedBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file))" : ""
+        return phase + count + bytes + (filename.isEmpty ? "" : "\n" + URL(fileURLWithPath: filename).lastPathComponent)
+    }
 }
 
 public struct ImportReport: Sendable {

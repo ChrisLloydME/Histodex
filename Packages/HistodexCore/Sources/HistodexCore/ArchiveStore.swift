@@ -5,7 +5,7 @@ import GRDB
 public actor ArchiveStore {
     public nonisolated let root: URL
     private let database: DatabaseQueue
-    public static let schemaVersion = 4
+    public static let schemaVersion = 5
 
     public init(root: URL) throws {
         self.root = root.standardizedFileURL.resolvingSymlinksInPath()
@@ -86,6 +86,14 @@ public actor ArchiveStore {
                 ALTER TABLE items ADD COLUMN isDelta INTEGER NOT NULL DEFAULT 0;
                 """)
         }
+        migrator.registerMigration("archive-v5") { db in
+            try db.execute(sql: """
+                CREATE TABLE state_names(id TEXT PRIMARY KEY, sourcePath TEXT NOT NULL, title TEXT NOT NULL, rawPath TEXT NOT NULL, sourceRoot TEXT NOT NULL);
+                CREATE INDEX state_name_path ON state_names(sourcePath);
+                CREATE TABLE source_revisions(sourceRoot TEXT NOT NULL, sourcePath TEXT NOT NULL, fingerprint TEXT NOT NULL, snapshotID TEXT NOT NULL REFERENCES snapshots(id), PRIMARY KEY(sourceRoot,sourcePath));
+                CREATE INDEX source_revision_snapshot ON source_revisions(snapshotID,sourcePath);
+                """)
+        }
         try migrator.migrate(database)
     }
 
@@ -150,10 +158,19 @@ public actor ArchiveStore {
               !source.root.path.hasPrefix(root.path + "/") else {
             throw ArchiveError.invalidSource("The archive and source folder must be separate, non-nested locations.")
         }
+        progress?(ImportProgress(completed: 0, total: 0, filename: "", phase: "Finding sessions"))
         let files = try source.discover()
         guard !files.isEmpty else { throw ArchiveError.invalidSource("No rollout files were found under sessions/ or archived_sessions/ in the selected folder.") }
         let snapshots = try SnapshotStore(root: root)
         var report = ImportReport()
+        progress?(ImportProgress(completed: 0, total: 0, filename: "", phase: "Reading session titles"))
+        do {
+            let names = try CodexStateTitles.read(source: source, archiveRoot: root)
+            try database.write { db in
+                for name in names { try db.execute(sql: "INSERT OR REPLACE INTO state_names VALUES(?,?,?,?,?)", arguments: [name.id, name.path, name.title, name.rawPath, source.root.path]) }
+            }
+        } catch is CancellationError { throw CancellationError() }
+        catch { report.errors.append("Session titles: \(error.localizedDescription)") }
         // Preserve the append-only name index before interpreting it, just like rollouts.
         let index = source.root.appendingPathComponent("session_index.jsonl")
         if FileManager.default.fileExists(atPath: index.path) {
@@ -164,20 +181,40 @@ public actor ArchiveStore {
             catch { report.errors.append("session_index.jsonl: \(error.localizedDescription)") }
         }
         var captured: [Snapshot] = []
+        var revisions: [(String, String, String)] = []
         for (index, file) in files.enumerated() {
             try Task.checkCancellation()
-            progress?(ImportProgress(completed: index, total: files.count * 2, filename: "Snapshot: " + file.url.lastPathComponent))
-            do { captured.append(try snapshots.snapshot(source: source, file: file)) }
+            progress?(ImportProgress(completed: index, total: files.count * 2, filename: file.url.lastPathComponent, phase: "Copying sessions"))
+            do {
+                let fingerprint = try source.fingerprint(file)
+                let cached: Snapshot? = try database.read { db in
+                    guard let row = try Row.fetchOne(db, sql: "SELECT s.* FROM snapshots s JOIN source_revisions r ON r.snapshotID=s.id WHERE r.sourceRoot=? AND r.sourcePath=? AND r.fingerprint=?", arguments: [source.root.path,file.relativePath,fingerprint]) else { return nil }
+                    return Snapshot(id: row["id"], rawPath: row["rawPath"], parsePath: row["parsePath"], byteSize: UInt64(row["byteSize"] as Int64), sourcePath: file.relativePath)
+                }
+                if let cached, FileManager.default.fileExists(atPath: root.appendingPathComponent(cached.parsePath).path), FileManager.default.fileExists(atPath: root.appendingPathComponent(cached.rawPath).path) { captured.append(cached) }
+                else {
+                    let snapshot = try snapshots.snapshot(source: source, file: file) { bytes, total in
+                        progress?(ImportProgress(completed: index, total: files.count * 2, filename: file.relativePath, phase: "Copying sessions", processedBytes: bytes, totalBytes: total))
+                    }
+                    captured.append(snapshot)
+                    if try source.fingerprint(file) == fingerprint { revisions.append((file.relativePath, fingerprint, snapshot.id)) }
+                }
+            }
             catch is CancellationError { throw CancellationError() }
             catch { report.errors.append("\(file.relativePath): \(error.localizedDescription)") }
         }
-        for snapshot in captured { try register(snapshot) }
+        try register(captured)
+        try database.write { db in
+            for (path, fingerprint, id) in revisions { try db.execute(sql: "INSERT OR REPLACE INTO source_revisions VALUES(?,?,?,?)", arguments: [source.root.path, path, fingerprint, id]) }
+        }
         let known = try knownSnapshots() + captured
         for (index, snapshot) in captured.enumerated() {
             try Task.checkCancellation()
-            progress?(ImportProgress(completed: files.count + index, total: files.count * 2, filename: "Import: " + snapshot.sourcePath))
+            progress?(ImportProgress(completed: files.count + index, total: files.count * 2, filename: snapshot.sourcePath, phase: "Indexing sessions"))
             do {
-                if try importSnapshot(snapshot, sourceRoot: source.root, known: known) { report.imported += 1 } else { report.unchanged += 1 }
+                if try importSnapshot(snapshot, sourceRoot: source.root, known: known, progress: { bytes, total in
+                    progress?(ImportProgress(completed: files.count + index, total: files.count * 2, filename: snapshot.sourcePath, phase: "Indexing sessions", processedBytes: bytes, totalBytes: total))
+                }) { report.imported += 1 } else { report.unchanged += 1 }
             } catch is CancellationError { throw CancellationError() }
             catch { report.errors.append("\(snapshot.sourcePath): \(error.localizedDescription)") }
         }
@@ -187,21 +224,29 @@ public actor ArchiveStore {
     }
 
     /// Rebuild normalized data from owned raw snapshots, without requiring the original Codex folder.
-    public func reparseArchive(onlyOutdated: Bool = false) throws -> ImportReport {
+    public func reparseArchive(onlyOutdated: Bool = false, progress: (@Sendable (ImportProgress) -> Void)? = nil) throws -> ImportReport {
+        progress?(ImportProgress(completed: 0, total: 0, filename: "", phase: "Preparing conversation index"))
         let snapshots: [Snapshot] = try database.read { db in
             try Row.fetchAll(db, sql: "SELECT s.* FROM snapshots s JOIN conversations c ON c.snapshotID=s.id WHERE (? = 0 OR s.parserVersion < ?) ORDER BY s.importedAt", arguments: [onlyOutdated, CodexAdapter.version]).map {
                 Snapshot(id: $0["id"], rawPath: $0["rawPath"], parsePath: $0["parsePath"], byteSize: UInt64($0["byteSize"] as Int64), sourcePath: $0["sourcePath"])
             }
         }
+        guard !snapshots.isEmpty else { return ImportReport() }
         let known = try knownSnapshots()
         var report = ImportReport()
-        for snapshot in snapshots {
+        for (index, snapshot) in snapshots.enumerated() {
+            progress?(ImportProgress(completed: index, total: snapshots.count, filename: snapshot.sourcePath, phase: "Rebuilding index"))
             try Task.checkCancellation()
-            do { _ = try importSnapshot(snapshot, sourceRoot: root, known: known, force: true); report.imported += 1 }
+            do {
+                _ = try importSnapshot(snapshot, sourceRoot: root, known: known, force: true, progress: { bytes, total in
+                    progress?(ImportProgress(completed: index, total: snapshots.count, filename: snapshot.sourcePath, phase: "Rebuilding index", processedBytes: bytes, totalBytes: total))
+                }); report.imported += 1
+            }
             catch is CancellationError { throw CancellationError() }
             catch { report.errors.append("\(snapshot.sourcePath): \(error.localizedDescription)") }
         }
         try applyNames()
+        progress?(ImportProgress(completed: snapshots.count, total: snapshots.count, filename: "", phase: "Index complete"))
         return report
     }
 
@@ -221,18 +266,15 @@ public actor ArchiveStore {
 
     private func applyNames() throws {
         try database.write { db in
-            let iso = ISO8601DateFormatter()
-            let fractional = ISO8601DateFormatter(); fractional.formatOptions.insert(.withFractionalSeconds)
-            func date(_ value: String) -> Date? { fractional.date(from: value) ?? iso.date(from: value) }
-            for row in try Row.fetchAll(db, sql: "SELECT c.id,c.baseTitle,c.titleUpdatedAt,n.title,n.updatedAt FROM conversations c LEFT JOIN conversation_names n ON n.id=c.id") {
-                var title: String = row["baseTitle"]
-                if let name: String = row["title"] {
-                    let eventDate = date(row["titleUpdatedAt"])
-                    let indexDate = date(row["updatedAt"])
-                    if eventDate == nil || indexDate == nil || indexDate! >= eventDate! { title = name }
-                }
-                if !title.isEmpty { try db.execute(sql: "UPDATE conversations SET title=? WHERE id=?", arguments: [title, row["id"] as String]) }
-            }
+            // Agent Sessions precedence: explicit index name, state title/first
+            // user message, then the rollout-derived title. Match state by ID first.
+            try db.execute(sql: """
+                UPDATE conversations SET title = coalesce(
+                    (SELECT title FROM conversation_names WHERE id=conversations.id),
+                    (SELECT title FROM state_names WHERE id=conversations.id),
+                    (SELECT n.title FROM state_names n JOIN source_revisions sr ON sr.sourcePath=n.sourcePath AND sr.sourceRoot=n.sourceRoot WHERE sr.snapshotID=conversations.snapshotID ORDER BY n.id LIMIT 1),
+                    nullif(baseTitle,''), title)
+                """)
         }
     }
 
@@ -244,23 +286,30 @@ public actor ArchiveStore {
         }
     }
 
-    private func register(_ snapshot: Snapshot) throws {
+    private func register(_ snapshots: [Snapshot]) throws {
         try database.write { db in
+            for snapshot in snapshots {
             try db.execute(sql: """
                 INSERT OR IGNORE INTO snapshots(id,rawPath,parsePath,sourcePath,byteSize,importedAt,parserVersion,status)
                 VALUES(?,?,?,?,?,?,?,'pending')
                 """, arguments: [snapshot.id, snapshot.rawPath, snapshot.parsePath, snapshot.sourcePath, Int64(snapshot.byteSize), ISO8601DateFormatter().string(from: Date()), CodexAdapter.version])
             try db.execute(sql: "INSERT OR IGNORE INTO snapshot_sources VALUES(?,?)", arguments: [snapshot.id, snapshot.sourcePath])
+            }
         }
     }
 
-    private func importSnapshot(_ snapshot: Snapshot, sourceRoot: URL, known: [Snapshot], force: Bool = false) throws -> Bool {
+    private func importSnapshot(_ snapshot: Snapshot, sourceRoot: URL, known: [Snapshot], force: Bool = false, progress: ((Int64, Int64) -> Void)? = nil) throws -> Bool {
         let resolver = HistoryResolver(root: root, snapshots: known)
         let metadata = try resolver.metadata(snapshot)
         if !force, metadata.parentRolloutID.isEmpty, try database.read({ db in
             try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM snapshots WHERE id=? AND parserVersion=? AND status IN ('complete','superseded'))", arguments: [snapshot.id, CodexAdapter.version]) ?? false
         }) { return false }
         let plan = try resolver.plan(for: snapshot)
+        let totalBytes = try plan.segments.reduce(Int64(0)) { total, segment in
+            try total + (segment.endByte ?? Int64(root.appendingPathComponent(segment.snapshot.parsePath).resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0))
+        }
+        var processedBytes: Int64 = 0; var lastProgress = Date.distantPast
+        progress?(0, totalBytes)
         let identity = metadata.sourceID.isEmpty ? SHA256.hash(data: Data(snapshot.sourcePath.utf8)).map { String(format: "%02x", $0) }.joined() : metadata.sourceID
         try database.write { db in
             try db.execute(sql: """
@@ -299,6 +348,9 @@ public actor ArchiveStore {
                             if let end = segment.endOrdinal, let data = line.data,
                                let raw = try? JSONDecoder().decode(JSONValue.self, from: data),
                                let ordinal = raw["ordinal"].integer, ordinal >= end { throw PrefixEnd.reached }
+                            if Date().timeIntervalSince(lastProgress) >= 0.1 {
+                                progress?(processedBytes + line.offset, totalBytes); lastProgress = Date()
+                            }
                             var item = adapter.normalize(line, rawPath: segment.snapshot.parsePath, assetStore: assetStore)
                             item.conversationID = identity
                             if !item.contextText.isEmpty {
@@ -323,6 +375,8 @@ public actor ArchiveStore {
                             count += 1
                         }
                     } catch PrefixEnd.reached {}
+                    processedBytes += try segment.endByte ?? Int64(root.appendingPathComponent(segment.snapshot.parsePath).resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+                    progress?(processedBytes, totalBytes)
                 }
                 for text in plan.warnings {
                     var warning = ArchiveItem()

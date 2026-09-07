@@ -60,14 +60,14 @@ enum ConversationSemantics {
         guard !clean.isEmpty else { return nil }
         // Extractive: use the actual request, never a tool result or generated summary.
         let lines = clean.split(whereSeparator: \.isNewline).map(String.init)
-        let line = lines.first(where: {
+        let useful = lines.filter {
             let heading = $0.trimmingCharacters(in: CharacterSet(charactersIn: "# :\t"))
             return !heading.isEmpty && !["[Archived image]", "[Archived audio]", "My request for Codex", "User request", "Task"].contains(heading)
-        }) ?? clean
-        let plain = line.replacingOccurrences(of: #"^\s*(?:#{1,6}\s+|[-*]\s+|\d+[.)]\s+)"#, with: "", options: .regularExpression)
+        }
+        let plain = useful.joined(separator: " ").replacingOccurrences(of: #"^\s*(?:#{1,6}\s+|[-*]\s+|\d+[.)]\s+)"#, with: "", options: .regularExpression)
         let compact = plain.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         guard !compact.isEmpty, compact != "[Archived image]" else { return nil }
-        return abbreviate(compact)
+        return abbreviate(compact, limit: 512)
     }
 
     static func explicitTitle(_ text: String) -> String? {
