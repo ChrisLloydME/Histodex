@@ -16,8 +16,8 @@ Open `Histodex.xcodeproj` in Xcode 16 or newer with Swift 6 support, select the 
 
 1. Open **Histodex → Settings…** (⌘,) and click **Choose Folder…** to select your `.codex` directory. Hidden folders are visible in the picker.
 2. Histodex snapshots rollouts from `sessions/` and `archived_sessions/` and optional Codex title metadata (the name index and state database/WAL), then parses its own copies. Source files are never modified. Progress, cancellation and errors stay in Settings.
-3. Choose a conversation from the sidebar. The search field finds titles, projects, dates and conversation content; selecting a content result opens its exact item.
-4. Read user messages on the right and assistant replies on the left. Conversation Info → **Browse All Records…** opens a separate searchable window for commands, reasoning, injected instructions, session activity and unknown records. Earlier/later navigation appears at the edges of the transcript, and your reading position is restored.
+3. Choose a conversation from the date-grouped sidebar. The search field finds titles, projects, dates and conversation content; selecting a content result opens its exact item.
+4. Read lightly tinted user messages on the right and assistant replies in the centered reading column. Conversation Info → **Browse All Records…** opens a separate searchable window for commands, reasoning, injected instructions, session activity and unknown records. Earlier/later navigation appears at the edges of the transcript, and your reading position is restored.
 5. Use the ellipsis beside an entry for readable full text, original archived text, attachments and provenance. Long output is paged. Missing attachments remain explicit.
 6. Use **Update Archive** or **Rebuild Conversation Index** in Settings for archive maintenance. Parser updates automatically repair existing conversations from owned snapshots. Manual rebuilding also works without Codex; Update Archive refreshes saved Codex titles.
 
@@ -52,4 +52,4 @@ HISTODEX_REAL_FIXTURES="$PWD/.tmp/real-source" zsh Scripts/core.sh test
 
 Never commit private rollout fixtures. The test suite generates synthetic fixtures under `.tmp/tests/` and removes its own per-test artifacts.
 
-See [Conversation Design](Docs/ConversationDesign.md) for the Messages-inspired native interface and code-only validation. See [Architecture](Docs/Architecture.md) for source research and dependency decisions, and [Validation](Docs/Validation.md) for verified behavior and current limits. Full dependency licenses are bundled under `Histodex/Notices/`.
+See [Conversation Design](Docs/ConversationDesign.md) for the FlowDown-inspired AppKit interface and code-only validation, and [FlowDown Reference](Docs/FlowDownReference.md) for the inspected source revision and adaptation details. See [Architecture](Docs/Architecture.md) for source research and dependency decisions, and [Validation](Docs/Validation.md) for verified behavior and current limits. Full dependency licenses are bundled under `Histodex/Notices/`.

@@ -50,3 +50,11 @@ The compile-only, signed Xcode app build passes. No application launch, Computer
 All 52 headless tests pass with both optional private fixture sets enabled. Three additional current-session copies were compared directly with the supplied Codex screenshot: 修复搜索超时问题, 整理 Git 提交历史, and 评估 swift-taglib 集成. The archived titles match their Codex display names, and injected plugin content does not appear in normal conversation queries. Regression coverage also verifies arbitrary future context provenance, mixed authored/context records, literal user markup, internal-thread list/search exclusion with raw preservation, legacy source classification, offline name persistence, schema migration and concise progress. Private fixtures remain under ignored `.tmp`.
 
 The final compile-only Xcode build succeeds. No application launch or Computer Use was performed; layout validation used the supplied comparison and AppKit source/constraint review.
+
+## FlowDown interface migration (2026-10-09)
+
+Histodex's main window now uses a source-informed AppKit adaptation of FlowDown's macOS navigation and reading layout. The reference revision and inspected components are recorded in [FlowDown Reference](FlowDownReference.md).
+
+The Histodex compile-only build succeeds. The headless core suite discovers 54 tests: 52 pass, 2 optional private-fixture tests skip, and there are no failures. The 12 presentation tests include new coverage for the shared centered reading column at 320/480/1100/1800-point widths and retained native user-text/inline-code colors. Existing scoped-search and exact-target regressions continue to pass. Source review also checks nonselectable date sections, selection preservation across list refreshes, settings callbacks and bounded title constraints.
+
+Neither Histodex nor FlowDown was launched. FlowDown was not compiled, and its installed app or data was not accessed. No app-hosted tests, UI tests, screenshots or runtime visual verification were performed. Build products and test-generated fixtures stay in ignored `.tmp/`. The preexisting Beta bundle identifier change remains outside the UI commits.

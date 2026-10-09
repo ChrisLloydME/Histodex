@@ -76,14 +76,38 @@ final class PresentationTests: XCTestCase {
         XCTAssertGreaterThan(style?.headIndent ?? 0, style?.firstLineHeadIndent ?? 0)
         XCTAssertTrue(list.string.contains("•\tFirst item"))
     }
-    @MainActor func testOutgoingLinksRemainLegibleAndSelectable() {
+    @MainActor func testOutgoingLinksKeepNativeColorAndRemainSelectable() {
         let row = TranscriptEntry.project([item(1, kind: .message, role: "user", text: "See [documentation](https://example.com)")])[0]
         let layout = TranscriptLayout(entry: row, expanded: false, width: 700, date: nil, highlighted: false)
         let range = (layout.attributedText.string as NSString).range(of: "documentation")
         XCTAssertNotEqual(range.location, NSNotFound)
-        XCTAssertEqual(layout.attributedText.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor, .white)
+        XCTAssertEqual(layout.attributedText.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor, .linkColor)
         XCTAssertNotNil(layout.attributedText.attribute(.link, at: range.location, effectiveRange: nil))
         XCTAssertNotNil(layout.attributedText.attribute(.underlineStyle, at: range.location, effectiveRange: nil))
+    }
+
+    @MainActor func testBothRolesShareACenteredReadingColumnAtWideAndNarrowWidths() {
+        for width in [320.0, 480.0, 1100.0, 1800.0] {
+            let assistant = TranscriptLayout(entry: TranscriptEntry.project([item(1, kind: .message, role: "assistant", text: "An answer")])[0], expanded: false, width: width, date: nil, highlighted: false)
+            let user = TranscriptLayout(entry: TranscriptEntry.project([item(2, kind: .message, role: "user", text: "A request")])[0], expanded: false, width: width, date: nil, highlighted: false)
+            XCTAssertEqual(assistant.readingWidth, user.readingWidth)
+            XCTAssertEqual(assistant.readingInset, user.readingInset)
+            XCTAssertEqual(assistant.readingInset * 2 + assistant.readingWidth, width, accuracy: 0.1)
+            XCTAssertLessThanOrEqual(assistant.readingWidth, 800)
+            XCTAssertEqual(assistant.bubbleWidth, assistant.readingWidth)
+            XCTAssertLessThan(user.bubbleWidth, user.readingWidth)
+            XCTAssertGreaterThan(user.bubbleWidth - user.textInset * 2, 0)
+            XCTAssertEqual(assistant.textInset, 0)
+        }
+    }
+    @MainActor func testTintedUserMessageKeepsCodeAndTextColors() {
+        let entry = TranscriptEntry.project([item(1, kind: .message, role: "user", text: "Use `swift test`\nSecond line")])[0]
+        let layout = TranscriptLayout(entry: entry, expanded: false, width: 700, date: nil, highlighted: false)
+        let code = (layout.attributedText.string as NSString).range(of: "swift test")
+        XCTAssertNotEqual(code.location, NSNotFound)
+        XCTAssertEqual(layout.attributedText.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, .textColor)
+        XCTAssertNotNil(layout.attributedText.attribute(.backgroundColor, at: code.location, effectiveRange: nil))
+        XCTAssertTrue(layout.attributedText.string.contains("\nSecond line"))
     }
 
 }

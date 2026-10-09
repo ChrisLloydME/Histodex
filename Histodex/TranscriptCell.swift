@@ -47,7 +47,7 @@ final class TranscriptCell: NSTableCellView {
         disclosure.isHidden = !layout.activity; summary.isHidden = !layout.activity; summary.stringValue = entry.summary
         body.textStorage?.setAttributedString(layout.attributedText); bodyScroll.isHidden = layout.textHeight == 0
         bodyScroll.hasVerticalScroller = layout.naturalTextHeight > layout.textHeight
-        body.linkTextAttributes = entry.style == .outgoing ? [.foregroundColor: NSColor.white, .underlineStyle: NSUnderlineStyle.single.rawValue] : [.foregroundColor: NSColor.linkColor]
+        body.linkTextAttributes = [.foregroundColor: NSColor.linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
         readMore.isHidden = !layout.truncated || layout.activity && !layout.expanded
         let missing = entry.assets.filter { $0.missingReason != nil }.count
         attachment.title = missing > 0 ? "\(missing) unavailable attachment\(missing == 1 ? "" : "s")…" : "\(entry.assets.count) attachment\(entry.assets.count == 1 ? "" : "s")…"
@@ -67,36 +67,39 @@ final class TranscriptCell: NSTableCellView {
     private func applyColors() {
         guard let current, let prepared else { return }
         let outgoing = current.style == .outgoing
-        bubble.layer?.backgroundColor = (outgoing ? NSColor.systemBlue : prepared.activity ? NSColor.controlBackgroundColor : NSColor.quaternaryLabelColor.withAlphaComponent(0.09)).cgColor
-        bubble.layer?.cornerRadius = prepared.activity ? 10 : 18
-        bubble.layer?.borderWidth = prepared.highlighted ? 2 : prepared.activity ? 0.5 : 0
-        bubble.layer?.borderColor = (prepared.highlighted ? NSColor.controlAccentColor : NSColor.separatorColor).cgColor
-        for button in [attachment, readMore] { button.contentTintColor = outgoing ? .white : .linkColor }
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let background = outgoing ? NSColor.controlAccentColor.withAlphaComponent(0.12) : prepared.activity ? NSColor.controlBackgroundColor : NSColor.clear
+            bubble.layer?.backgroundColor = background.cgColor
+            bubble.layer?.cornerRadius = 12
+            bubble.layer?.borderWidth = prepared.highlighted ? 2 : prepared.activity ? 0.5 : 0
+            bubble.layer?.borderColor = (prepared.highlighted ? NSColor.controlAccentColor : NSColor.separatorColor).cgColor
+        }
+        for button in [attachment, readMore] { button.contentTintColor = .linkColor }
     }
     override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); applyColors() }
     override func layout() {
         super.layout(); guard let p = prepared, let current else { return }
-        let contentWidth = min(p.bubbleWidth, max(250, bounds.width - 48))
-        let x = current.style == .outgoing ? bounds.width - 28 - contentWidth : 28
+        let contentWidth = p.bubbleWidth
+        let x = current.style == .outgoing ? p.readingInset + p.readingWidth - contentWidth : p.readingInset
         let top = bounds.height - p.dateHeight
         date.frame = NSRect(x: 20, y: bounds.height - 30, width: bounds.width - 40, height: 20)
-        author.frame = NSRect(x: x + 8, y: top - 20, width: contentWidth - 44, height: 16)
-        details.frame = NSRect(x: x + contentWidth - 28, y: p.activity ? 4 + p.bubbleHeight - 25 : top - 22, width: 24, height: 18)
-        bubble.frame = NSRect(x: x, y: 4, width: contentWidth, height: p.bubbleHeight)
+        author.frame = NSRect(x: x, y: top - 18, width: max(0, contentWidth - 32), height: 16)
+        details.frame = NSRect(x: x + contentWidth - 28, y: p.activity ? 16 + p.bubbleHeight - 25 : top - 20, width: 24, height: 18)
+        bubble.frame = NSRect(x: x, y: 16, width: contentWidth, height: p.bubbleHeight)
         var cursor = bubble.bounds.height
         if p.activity {
             disclosure.frame = NSRect(x: 12, y: cursor - 27, width: contentWidth - 48, height: 22)
             summary.frame = NSRect(x: 34, y: cursor - 46, width: contentWidth - 50, height: 18); cursor -= 54
         }
         if p.textHeight > 0 {
-            cursor -= 14
-            bodyScroll.frame = NSRect(x: 16, y: cursor - p.textHeight, width: contentWidth - 32, height: p.textHeight)
-            body.frame.size = NSSize(width: contentWidth - 32, height: max(p.textHeight, p.naturalTextHeight))
-            cursor -= p.textHeight + 14
+            cursor -= 12
+            bodyScroll.frame = NSRect(x: p.textInset, y: cursor - p.textHeight, width: contentWidth - p.textInset * 2, height: p.textHeight)
+            body.frame.size = NSSize(width: contentWidth - p.textInset * 2, height: max(p.textHeight, p.naturalTextHeight))
+            cursor -= p.textHeight + 12
         }
-        if p.imageHeight > 0 { preview.frame = NSRect(x: 12, y: cursor - p.imageHeight, width: contentWidth - 24, height: p.imageHeight); cursor -= p.imageHeight }
-        if p.attachmentHeight > 0 { attachment.frame = NSRect(x: 12, y: cursor - 28, width: contentWidth - 24, height: 24); cursor -= 32 }
-        if !readMore.isHidden { readMore.frame = NSRect(x: 12, y: cursor - 25, width: contentWidth - 24, height: 23) }
+        if p.imageHeight > 0 { preview.frame = NSRect(x: p.textInset, y: cursor - p.imageHeight, width: contentWidth - p.textInset * 2, height: p.imageHeight); cursor -= p.imageHeight }
+        if p.attachmentHeight > 0 { attachment.frame = NSRect(x: p.textInset, y: cursor - 28, width: contentWidth - p.textInset * 2, height: 24); cursor -= 32 }
+        if !readMore.isHidden { readMore.frame = NSRect(x: p.textInset, y: cursor - 25, width: contentWidth - p.textInset * 2, height: 23) }
     }
     @objc private func toggle() { onToggle?() }
     @objc private func inspect() { onRead?() }

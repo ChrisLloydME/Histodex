@@ -1,16 +1,15 @@
-# Conversation interface redesign
+# Conversation interface
 
-The macOS Messages conversation experience is the primary reference: a leading conversation list, a single reading surface, clear incoming/outgoing identity, and secondary commands outside the transcript. Apple describes that sidebar/transcript arrangement in the [Messages guide](https://support.apple.com/en-gb/guide/messages/ichte16154fb/mac). Native split-view navigation and a unified toolbar follow Apple's [sidebar guidance](https://developer.apple.com/design/human-interface-guidelines/sidebars) and [AppKit design guidance](https://developer.apple.com/videos/play/wwdc2025/310/).
-
-This is an archive reader. It uses those navigation, hierarchy and spacing conventions without adding a message composer, delivery states or fictional contacts.
+The main window follows [FlowDown's macOS interface](https://github.com/Lakr233/FlowDown), implemented independently in AppKit. [FlowDown Reference](FlowDownReference.md) records the inspected commit and source components. Histodex retains its offline archive model, import pipeline, search and native Markdown rendering.
 
 ## Window and navigation
 
-- `NSSplitViewController` with a native sidebar item, system sidebar material and source-list selection. A tracking toolbar separator follows the divider. The system sidebar toggle supports collapsing navigation.
-- Conversation rows show title, a compact date, project, and a bounded message preview. One search field finds both conversation metadata and archived text; content results retain exact-item targets.
-- The standard window title and subtitle show the conversation and project. The unified toolbar contains the sidebar toggle, tracking separator and Info command; no custom title view imposes a width on the split view. Record counts, source paths and import notices belong in Info/details rather than a permanent transcript header.
-- New conversations open at their latest page. Existing reading positions restore to the saved item. Earlier/later controls appear at the edges of the transcript, with database requests bounded to 100 items in the selected archive scope.
-- Time separators appear at meaningful gaps. User messages align right in blue; assistant messages align left with readable native Markdown. Width limits keep text lines comfortable in wide windows.
+- A persistent, resizable sidebar has Histodex branding and an import-settings action at the top. Settings, archive count and search shortcuts sit at the bottom. Search remains visible above the list and supports ⌘F.
+- Conversation rows use document symbols and subtle rounded accent selection. Creation-date headings group normal browsing; each row keeps a project/date subtitle. Search switches to one result section with snippets and exact-item targets. Date headings cannot be selected, and list refreshes preserve selection by conversation/item identity.
+- The reading surface is inset by 10 points, with 10-point corners and a thin system separator. Its 64-point header has a document symbol, a centered truncating title, project context and Conversation Info. Title and project fields stay inside the detail pane. Native window titles retain the selected conversation for system window lists.
+- New conversations open at their latest page. Existing reading positions restore to the saved item. Earlier/later controls appear at transcript edges, with database requests bounded to 100 items. The read-only footer also offers Latest Messages (Latest Records in the record browser).
+- Time separators appear at meaningful gaps. Both roles share one centered column, capped at 800 points. User messages align to its trailing edge with a light accent background, native text colors and 12-point corners. Assistant Markdown flows directly on the reading surface. Message details, attachments and full-text actions stay accessible.
+- The empty reader explains how to select or import history and includes an Archive Settings button. An empty selected conversation points to Conversation Info for supporting records.
 
 ## Presentation boundary
 
@@ -36,18 +35,16 @@ Without a saved title, the parser prefers a meaningful short user request in the
 
 Outdated projections rebuild from owned snapshots before loading the sidebar. Update Archive acquires source titles that older imports did not preserve. Unchanged rollout files reuse owned snapshots after checking identity, size, and nanosecond modification/change timestamps. Changed files retain immutable content-addressed snapshots.
 
-Both archive updates and index rebuilds show progress in Settings and the sidebar. The native window subtitle also reports the current phase/percentage, including when the sidebar is collapsed. Discovery and title copying show indeterminate progress; copying and normalization report work counts and bytes. Startup repair disables conflicting archive maintenance until it finishes.
+Discovery and title copying show indeterminate progress; copying and normalization report progress when measurable. Startup repair disables conflicting archive maintenance until it finishes.
 
-## Settings
+## Settings and progress
 
-Histodex → Settings (⌘,) owns folder selection, read-only bookmarks, update imports, progress, cancellation, errors, archive location and index rebuilding. Closing Settings does not cancel an in-progress import. The reading window has no import controls or progress footer.
+Histodex → Settings (⌘,), the sidebar gear, the top import action and the initial empty-state action all open the same settings window. Settings owns folder selection, read-only bookmarks, archive updates, cancellation, errors, archive location and index rebuilding. Closing Settings does not cancel an import.
 
-## Validation for this revision
+Archive operations display their phase and progress in the sidebar and Settings. Startup repair disables search and conflicting archive maintenance until it finishes. The footer shows the total local conversation count.
 
-The application was not launched. No Computer Use, screenshots, accessibility automation or visual inspection was performed, as requested. Validation consists of source review against native conventions, compile-only Xcode builds, and headless package tests. Eight focused presentation tests cover grouping/provenance, message roles, structured output, collapsed payloads, sizing bounds, search highlighting, Markdown paragraph structure and outgoing links. Runtime appearance and interaction fidelity are not claimed to be visually verified.
+## Validation
 
-## Fixed sidebar revision (2026-09-07)
+For the FlowDown migration, neither Histodex nor FlowDown is launched. FlowDown is read only as a temporary source checkout and is not compiled. Validation uses compile-only Histodex builds, headless HistodexCore tests and source review. No runtime screenshots or interaction inspection are performed, so visual fidelity is not claimed to be verified.
 
-The supplied Messages comparison informed this revision. The sidebar is permanently visible, with no toolbar toggle. The unified toolbar retains a split-tracking separator and the conversation Info action. Native window title metadata remains available, but its toolbar display is hidden; a truncating, noninteractive heading is constrained to the detail pane, preventing titles from widening the sidebar's toolbar region. Search and conversation rows retain native sidebar spacing.
-
-Progress in the sidebar and Settings consists of the operation, percentage when measurable, and a native progress indicator. Byte sizes and current filenames are omitted. Source review and compilation validate this change; the app was not launched or inspected through Computer Use.
+Presentation tests cover role identity, grouped supporting records, bounded previews, cached geometry, Markdown line breaks/tables, native outgoing link colors, retained inline-code styles, and a shared centered reading column at narrow and wide widths. Existing archive tests cover scoped search, exact-item targets, provenance, import and rebuild behavior.

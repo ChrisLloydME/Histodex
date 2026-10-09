@@ -35,7 +35,7 @@ final class ArchiveEmptyView: NSView {
         message.font = .systemFont(ofSize: 13); message.textColor = .secondaryLabelColor; message.alignment = .center
         button.bezelStyle = .rounded; button.target = self; button.action = #selector(openSettings)
         let stack = NSStackView(views: [icon, title, message, button])
-        stack.orientation = .vertical; stack.alignment = .center; stack.spacing = 16
+        stack.orientation = .vertical; stack.alignment = .centerX; stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false; addSubview(stack)
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: topAnchor), stack.bottomAnchor.constraint(equalTo: bottomAnchor),

@@ -130,7 +130,7 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
         conversationContext.alignment = .center; conversationContext.lineBreakMode = .byTruncatingMiddle
         conversationContext.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let headings = NSStackView(views: [conversationHeading, conversationContext])
-        headings.orientation = .vertical; headings.alignment = .center; headings.spacing = 4
+        headings.orientation = .vertical; headings.alignment = .centerX; headings.spacing = 4
         let archiveIcon = NSImageView(image: NSImage(systemSymbolName: "doc.text", accessibilityDescription: "Archived conversation")!)
         archiveIcon.contentTintColor = .controlAccentColor
         infoButton.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "Conversation Info")
@@ -156,6 +156,7 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
         readerStatus.font = .systemFont(ofSize: 11); readerStatus.textColor = .secondaryLabelColor
         readerStatus.lineBreakMode = .byTruncatingTail
         readerStatus.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        latestButton.title = scope == .allRecords ? "Latest Records" : "Latest Messages"
         latestButton.bezelStyle = .inline; latestButton.font = .systemFont(ofSize: 12)
         latestButton.target = self; latestButton.action = #selector(latest); latestButton.isEnabled = false
         let readerFooter = NSStackView(views: [readerStatus, NSView(), latestButton]); readerFooter.spacing = 12
@@ -257,7 +258,8 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
             controller.onOpenSettings = self.onOpenSettings
             let recordsWindow = NSWindow(contentViewController: controller)
             controller.configureWindow(recordsWindow)
-            recordsWindow.setContentSize(NSSize(width: 1100, height: 760)); recordsWindow.center()
+            recordsWindow.setContentSize(NSSize(width: 1100, height: 760))
+            recordsWindow.minSize = NSSize(width: 850, height: 550); recordsWindow.center()
             let wc = NSWindowController(window: recordsWindow); self.detailWindows.append(wc); wc.showWindow(nil)
             controller.select(selected)
         }
@@ -282,6 +284,7 @@ final class ArchiveBrowserController: NSSplitViewController, NSTableViewDataSour
                 results += hits.compactMap { hit in byID[hit.conversationID].map { SidebarEntry(conversation: $0, hit: hit) } }
                 rebuildSidebarRows(searching: !query.isEmpty)
                 libraryCount.stringValue = "\(list.count) conversation\(list.count == 1 ? "" : "s")"
+                sidebar.deselectAll(nil)
                 sidebar.reloadData(); sidebarEmpty.isHidden = !results.isEmpty
                 sidebarEmpty.stringValue = query.isEmpty ? "No Conversations\n\nImport your history in Settings." : "No Results\n\nTry another word, project, or date."
                 if let index = sidebarRow(where: { $0.key == oldKey }) { sidebar.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false) }
