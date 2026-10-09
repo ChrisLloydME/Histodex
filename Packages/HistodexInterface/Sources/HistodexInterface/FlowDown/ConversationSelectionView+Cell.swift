@@ -6,6 +6,7 @@
 //
 
 import UIKit
+import LanguageModelChatUI
 import SnapKit
 
 extension ConversationSelectionView {
@@ -52,7 +53,7 @@ extension ConversationSelectionView {
             selectedBackgroundView = selectionColor
 
             stack.snp.makeConstraints { make in
-                make.edges.equalToSuperview().inset(UIEdgeInsets(horizontal: 24, vertical: 16))
+                make.edges.equalToSuperview().inset(UIEdgeInsets(top: 16, left: 24, bottom: 16, right: 24))
             }
 
             contentView.isUserInteractionEnabled = true

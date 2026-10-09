@@ -22,7 +22,7 @@ public final class ArchiveRootController: MainController, UISearchBarDelegate, S
     private var hasEarlier = false
     private var hasLater = false
     private let previous = UIButton(type: .system)
-    private let next = UIButton(type: .system)
+    private let nextPageButton = UIButton(type: .system)
     private let latest = UIButton(type: .system)
     private let pageStatus = UILabel()
     private let chatContainer = UIView()
@@ -60,16 +60,16 @@ public final class ArchiveRootController: MainController, UISearchBarDelegate, S
             }])
         }
         contentView.contentView.addSubview(chatContainer)
-        let footer = UIStackView(arrangedSubviews: [previous, next, UIView(), pageStatus, latest])
+        let footer = UIStackView(arrangedSubviews: [previous, nextPageButton, UIView(), pageStatus, latest])
         footer.spacing = 12; footer.alignment = .center
         contentView.contentView.addSubview(footer)
         chatContainer.snp.makeConstraints { make in make.left.top.right.equalToSuperview(); make.bottom.equalTo(footer.snp.top).offset(-8) }
         footer.snp.makeConstraints { make in make.left.right.equalToSuperview().inset(20); make.bottom.equalToSuperview().inset(8); make.height.equalTo(32) }
-        for (button, title) in [(previous, "Earlier"), (next, "Later"), (latest, scope == .conversation ? "Latest Messages" : "Latest Records")] {
+        for (button, title) in [(previous, "Earlier"), (nextPageButton, "Later"), (latest, scope == .conversation ? "Latest Messages" : "Latest Records")] {
             button.setTitle(title, for: .normal); button.titleLabel?.font = .preferredFont(forTextStyle: .caption1); button.isEnabled = false
         }
         previous.addAction(UIAction { [weak self] _ in self?.earlier() }, for: .touchUpInside)
-        next.addAction(UIAction { [weak self] _ in self?.later() }, for: .touchUpInside)
+        nextPageButton.addAction(UIAction { [weak self] _ in self?.later() }, for: .touchUpInside)
         latest.addAction(UIAction { [weak self] _ in self?.latestPage() }, for: .touchUpInside)
         pageStatus.font = .preferredFont(forTextStyle: .caption1); pageStatus.textColor = .secondaryLabel; pageStatus.text = "Read-only archive"
         empty.numberOfLines = 0; empty.textAlignment = .center; empty.textColor = .secondaryLabel
@@ -92,7 +92,7 @@ public final class ArchiveRootController: MainController, UISearchBarDelegate, S
             defer { isIndexing = false; settings.setExternalBusy(false); sidebar.searchBar.isUserInteractionEnabled = true; displayProgress(nil) }
             do {
                 let report = try await store.reparseArchive(onlyOutdated: true) { [weak self] progress in
-                    Task { @MainActor in self?.displayProgress(progress) }
+                    Task { @MainActor in guard let self, self.isIndexing else { return }; self.displayProgress(progress) }
                 }
                 reloadSidebar()
                 if !report.errors.isEmpty { showError(ArchiveError.invalidArchive(report.errors.joined(separator: "\n"))) }
@@ -163,7 +163,7 @@ public final class ArchiveRootController: MainController, UISearchBarDelegate, S
         let changed = selected?.id != conversation.id
         selected = conversation; onConversationTitleChanged?(conversation.title)
         isApplyingPage = true; rows = []; empty.isHidden = true
-        previous.isEnabled = false; next.isEnabled = false; latest.isEnabled = false
+        previous.isEnabled = false; nextPageButton.isEnabled = false; latest.isEnabled = false
         if changed || chat == nil { installChat(for: conversation) }
         pageTask = Task {
             do {
@@ -195,7 +195,7 @@ public final class ArchiveRootController: MainController, UISearchBarDelegate, S
                 let earliest = try await store.items(conversationID: conversation.id, limit: 1, scope: scope).first?.ordinal
                 let following = try await store.items(conversationID: conversation.id, from: (items.last?.ordinal ?? -1) + 1, limit: 1, scope: scope)
                 let pageRows = ArchiveReaderPage.rows(items)
-                let messages = await ArchiveChatProjection.messages(rows: pageRows, conversationID: conversation.id, root: store.root)
+                let messages = await ArchiveChatProjection.messages(rows: pageRows, conversationID: conversation.id, root: store.root, targetOrdinal: target)
                 guard generation == token, !Task.isCancelled else { return }
                 rows = pageRows; hasEarlier = earliest.map { $0 < (items.first?.ordinal ?? 0) } ?? false; hasLater = !following.isEmpty
                 chatStorage?.replace(messages: messages, title: conversation.title)
@@ -204,7 +204,7 @@ public final class ArchiveRootController: MainController, UISearchBarDelegate, S
                 chat?.reloadArchive()
                 empty.text = scope == .conversation ? "No Conversation Messages\n\nOpen Conversation Info to browse supporting records." : "No Archived Records"
                 empty.isHidden = !items.isEmpty
-                previous.isEnabled = hasEarlier; next.isEnabled = hasLater; latest.isEnabled = !items.isEmpty
+                previous.isEnabled = hasEarlier; nextPageButton.isEnabled = hasLater; latest.isEnabled = !items.isEmpty
                 DispatchQueue.main.async { [weak self] in
                     guard let self, generation == token else { return }
                     chat?.messageListView.scrollToArchiveMessage(targetRow?.id ?? rows.first?.id, atEnd: atEnd)

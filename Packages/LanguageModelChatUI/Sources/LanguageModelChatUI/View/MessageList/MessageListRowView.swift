@@ -18,12 +18,22 @@ class MessageListRowView: ListRowView, UIContextMenuInteractionDelegate {
     }
 
     let contentView = UIView()
+    private let archiveMenuButton = UIButton(type: .system)
+    var archiveMenu: UIMenu? {
+        didSet { archiveMenuButton.menu = archiveMenu; archiveMenuButton.isHidden = archiveMenu == nil }
+    }
     var contextMenuProvider: ((CGPoint) -> UIMenu?)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         clipsToBounds = false // tool tip will extend out
         addSubview(contentView)
+        archiveMenuButton.setImage(UIImage(systemName: "ellipsis"), for: .normal)
+        archiveMenuButton.tintColor = .secondaryLabel
+        archiveMenuButton.accessibilityLabel = "Message Details and Full Text"
+        archiveMenuButton.showsMenuAsPrimaryAction = true
+        archiveMenuButton.isHidden = true
+        addSubview(archiveMenuButton)
         contentView.isUserInteractionEnabled = true
 
         contentView.addInteraction(UIContextMenuInteraction(delegate: self))
@@ -39,6 +49,7 @@ class MessageListRowView: ListRowView, UIContextMenuInteractionDelegate {
         super.layoutSubviews()
 
         let insets = MessageListView.listRowInsets
+        archiveMenuButton.frame = CGRect(x: bounds.width - 44, y: bounds.height - 16, width: 24, height: 16)
         contentView.frame = CGRect(
             x: insets.left,
             y: 0,
@@ -52,6 +63,7 @@ class MessageListRowView: ListRowView, UIContextMenuInteractionDelegate {
     override func prepareForReuse() {
         super.prepareForReuse()
         contextMenuProvider = nil
+        archiveMenu = nil
 
         // clear any LTXLabel selection
         var queue = subviews

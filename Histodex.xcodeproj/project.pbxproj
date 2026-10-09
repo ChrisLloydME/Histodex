@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		6E3C6A9D304DB1C4002F659D /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 6E3C6A9C304DB1C4002F659D /* AppIcon.icon */; };
 		ABCD00000000000000000001 /* HistodexCore in Frameworks */ = {isa = PBXBuildFile; productRef = ABCD00000000000000000002 /* HistodexCore */; };
+		F10000000000000000000011 /* HistodexInterface in Frameworks */ = {isa = PBXBuildFile; productRef = F10000000000000000000012 /* HistodexInterface */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -35,10 +36,19 @@
 		6E3C6A9C304DB1C4002F659D /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F10000000000000000000014 /* Exceptions for Histodex */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (Info.plist,);
+			target = 6E3C69D5304D6196002F659D /* Histodex */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		6E3C69D8304D6196002F659D /* Histodex */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Histodex;
+			exceptions = (F10000000000000000000014,);
 			sourceTree = "<group>";
 		};
 		6E3C69E9304D6198002F659D /* HistodexTests */ = {
@@ -59,6 +69,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				ABCD00000000000000000001 /* HistodexCore in Frameworks */,
+				F10000000000000000000011 /* HistodexInterface in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -121,6 +132,7 @@
 			name = Histodex;
 			packageProductDependencies = (
 				ABCD00000000000000000002 /* HistodexCore */,
+				F10000000000000000000012 /* HistodexInterface */,
 			);
 			productName = Histodex;
 			productReference = 6E3C69D6304D6196002F659D /* Histodex.app */;
@@ -206,6 +218,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				ABCD00000000000000000003 /* XCLocalSwiftPackageReference "Packages/HistodexCore" */,
+				F10000000000000000000013 /* XCLocalSwiftPackageReference "Packages/HistodexInterface" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6E3C69D7304D6196002F659D /* Products */;
@@ -411,13 +424,15 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = YM5G2M8PV9;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Histodex/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -426,12 +441,17 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.lloydME.Histodex;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
 			};
 			name = Debug;
 		};
@@ -444,13 +464,15 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = YM5G2M8PV9;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Histodex/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -459,12 +481,17 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.lloydME.Histodex;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
 			};
 			name = Release;
 		};
@@ -594,12 +621,20 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/HistodexCore;
 		};
+		F10000000000000000000013 /* XCLocalSwiftPackageReference "Packages/HistodexInterface" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/HistodexInterface;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		ABCD00000000000000000002 /* HistodexCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = HistodexCore;
+		};
+		F10000000000000000000012 /* HistodexInterface */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HistodexInterface;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

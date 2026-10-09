@@ -8,6 +8,7 @@
 import Combine
 import SnapKit
 import UIKit
+import LanguageModelChatUI
 
 class SidebarDraggerView: UIView {
     let allowedMinimalValue = 200

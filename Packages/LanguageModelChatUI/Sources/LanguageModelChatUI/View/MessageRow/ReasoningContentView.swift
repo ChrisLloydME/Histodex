@@ -27,6 +27,8 @@ final class ReasoningContentView: MessageListRowView {
     private static let tileContentLeading: CGFloat = 14
     private static let indicatorWidth: CGFloat = 2
 
+    var archiveTitle: String? { didSet { thinkingTile.archiveTitle = archiveTitle } }
+
     var thinkingDuration: TimeInterval = 0 {
         didSet {
             thinkingTile.thinkingDuration = thinkingDuration
@@ -294,9 +296,11 @@ extension ReasoningContentView {
             }
         }
 
+        var archiveTitle: String? { didSet { updateThinkingDurationText() } }
+
         private func updateThinkingDurationText() {
             let text = String.localized("Thought for \(Int(thinkingDuration)) seconds")
-            titleLabel.text = text
+            titleLabel.text = archiveTitle ?? text
         }
 
         override var intrinsicContentSize: CGSize {

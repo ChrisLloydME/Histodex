@@ -8,6 +8,10 @@
     "Read-only controller configuration and archive page reload",
     "Archive menus, item scrolling, highlighting and visible-item callbacks",
     "Assistant attachments and original file-data retention",
-    "Archived reasoning is not live inference"
+    "Archived reasoning is not live inference",
+    "Swift 6 ListViewAdapter isolation compatibility",
+    "Visible archive detail menu in existing row spacing and archived disclosure titles",
+    "Nonanimated archive page snapshots preserve exact-item scrolling",
+    "Pin transitive swift-collections 1.3.0 for Swift 6.2 compatibility"
   ]
 }

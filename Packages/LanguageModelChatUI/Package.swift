@@ -20,6 +20,8 @@ let package = Package(
         ),
     ],
     dependencies: [
+        .package(url: "https://github.com/apple/swift-collections", exact: "1.3.0"),
+
         .package(url: "https://github.com/Lakr233/ListViewKit", exact: "1.1.8"),
         .package(url: "https://github.com/Lakr233/MarkdownView", exact: "3.7.0"),
         .package(url: "https://github.com/Lakr233/Litext", exact: "1.2.1"),

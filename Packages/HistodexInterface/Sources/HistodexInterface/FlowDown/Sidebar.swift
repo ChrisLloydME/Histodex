@@ -6,6 +6,7 @@
 //
 
 import UIKit
+import LanguageModelChatUI
 import SnapKit
 
 class Sidebar: UIView {

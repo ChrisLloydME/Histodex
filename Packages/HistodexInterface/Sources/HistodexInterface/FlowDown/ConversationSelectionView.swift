@@ -2,6 +2,7 @@
 // Copyright FlowDown contributors. AGPL-3.0; see FlowDown-LICENSE.
 // Histodex changes: archive rows and selection callbacks replace ConversationManager/ChatSelection.
 import UIKit
+import LanguageModelChatUI
 import SnapKit
 
 struct ArchiveSidebarItem {
@@ -53,7 +54,11 @@ class ConversationSelectionView: UIView, UITableViewDelegate {
         guard let self, let item = items[id] else { return nil }
         let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath) as! Cell
         cell.use(item)
-        cell.onSelect = { [weak self] id in guard let self, let item = items[id] else { return }; onSelect?(item) }
+        cell.onSelect = { [weak self] id in
+            guard let self, let item = items[id] else { return }
+            if let path = dataSource.indexPath(for: id) { tableView.selectRow(at: path, animated: false, scrollPosition: .none) }
+            onSelect?(item)
+        }
         cell.menuProvider = menuProvider
         return cell
     }
@@ -66,6 +71,7 @@ class ConversationSelectionView: UIView, UITableViewDelegate {
             snapshot.appendSections([day])
             snapshot.appendItems((groups[day] ?? []).map(\.id), toSection: day)
         }
+        snapshot.reconfigureItems(snapshot.itemIdentifiers.filter { dataSource.snapshot().indexOfItem($0) != nil })
         dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
             guard let self else { return }
             tableView.setContentOffset(oldOffset, animated: false)

@@ -117,6 +117,7 @@ extension MessageListView: @preconcurrency ListViewAdapter {
         guard let entry = entryForRow(at: index) else { return }
         if let row = rowView as? MessageListRowView {
             let id = entry.archiveMessageID
+            row.archiveMenu = id.flatMap { archiveMenuProvider?($0) }
             row.contextMenuProvider = { [weak self] _ in id.flatMap { self?.archiveMenuProvider?($0) } }
             row.layer.borderWidth = id != nil && id == highlightedArchiveMessageID ? 2 : 0
             row.layer.borderColor = UIColor.tintColor.cgColor
@@ -151,6 +152,7 @@ extension MessageListView: @preconcurrency ListViewAdapter {
         } else if let reasoningContentView = rowView as? ReasoningContentView {
             if case let .reasoningContent(_, message) = entry {
                 reasoningContentView.theme = theme
+                reasoningContentView.archiveTitle = session?.message(for: message.id)?.metadata["histodex.title"]
                 reasoningContentView.isRevealed = message.isRevealed
                 reasoningContentView.isThinking = message.isThinking
                 reasoningContentView.thinkingDuration = message.thinkingDuration

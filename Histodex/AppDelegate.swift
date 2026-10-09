@@ -1,23 +1,12 @@
-import AppKit
 import HistodexCore
+import HistodexInterface
+import UIKit
 
 @main
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    static func main() {
-        let application = NSApplication.shared
-        let delegate = AppDelegate()
-        application.delegate = delegate
-        application.setActivationPolicy(.regular)
-        withExtendedLifetime(delegate) { application.run() }
-    }
-
-    private var windowController: NSWindowController?
-    private var settingsWindow: NSWindowController?
-    private var settings: ArchiveSettingsController?
-    private var browser: ArchiveBrowserController?
-
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        buildMenu()
+final class AppDelegate: UIResponder, UIApplicationDelegate {
+    static var archiveStore: ArchiveStore?
+    static var archiveError: Error?
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         do {
             let root: URL
             #if DEBUG
@@ -26,58 +15,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             #else
             root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("Histodex")
             #endif
-            let store = try ArchiveStore(root: root)
-            let content = ArchiveBrowserController(store: store); browser = content
-            content.onOpenSettings = { [weak self] in self?.showSettings() }
-            let configuration = ArchiveSettingsController(store: store); settings = configuration
-            configuration.onProgress = { [weak content] value in content?.showOperationProgress(value) }
-            content.onIndexingStateChanged = { [weak configuration] busy in
-                configuration?.setExternalBusy(busy)
-                #if DEBUG
-                if !busy, let source = ProcessInfo.processInfo.environment["HISTODEX_IMPORT_PATH"] {
-                    configuration?.importSource(URL(fileURLWithPath: source))
-                }
-                #endif
+            Self.archiveStore = try ArchiveStore(root: root)
+        } catch { Self.archiveError = error }
+        return true
+    }
+    func application(_ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(name: "Archive", sessionRole: connectingSceneSession.role)
+        configuration.delegateClass = SceneDelegate.self
+        return configuration
+    }
+}
+
+final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+    private var recordsConversationID: String?
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        guard let scene = scene as? UIWindowScene else { return }
+        let window = UIWindow(windowScene: scene); self.window = window
+        let activity = connectionOptions.userActivities.first ?? session.stateRestorationActivity
+        let recordsID = activity?.userInfo?["recordsConversationID"] as? String
+        recordsConversationID = recordsID
+        if let store = AppDelegate.archiveStore {
+            let root = ArchiveRootController(store: store, scope: recordsID == nil ? .conversation : .allRecords)
+            root.onConversationTitleChanged = { [weak scene] title in scene?.title = recordsID == nil ? title : "Archive Records · " + title }
+            root.onOpenRecords = { id in
+                let activity = NSUserActivity(activityType: "com.lloydME.Histodex.records")
+                activity.userInfo = ["recordsConversationID": id]
+                UIApplication.shared.requestSceneSessionActivation(nil, userActivity: activity, options: nil)
             }
-            configuration.onArchiveChanged = { [weak content] in content?.archiveDidChange() }
-            let window = NSWindow(contentViewController: content)
-            content.configureWindow(window)
-            window.title = "Histodex"; window.setContentSize(NSSize(width: 1180, height: 820)); window.minSize = NSSize(width: 850, height: 550)
-            window.center(); window.setFrameAutosaveName("ArchiveWindow")
-            let controller = NSWindowController(window: window); windowController = controller
-            controller.showWindow(nil); NSApp.activate(ignoringOtherApps: true)
-        } catch { NSAlert(error: error).runModal(); NSApp.terminate(nil) }
-    }
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
-    @objc private func showSettings() {
-        guard let settings else { return }
-        if settingsWindow == nil {
-            let window = NSWindow(contentViewController: settings)
-            window.title = "Settings"; window.styleMask.remove(.resizable); window.center()
-            settingsWindow = NSWindowController(window: window)
+            window.rootViewController = root
+            scene.title = recordsID == nil ? "Histodex" : "Archive Records"
+            scene.sizeRestrictions?.minimumSize = CGSize(width: 850, height: 550)
+            #if targetEnvironment(macCatalyst)
+            scene.titlebar?.titleVisibility = .hidden
+            scene.titlebar?.toolbar = nil
+            #endif
+            if let recordsID { root.openConversation(recordsID) }
+        } else {
+            let error = UIViewController(); error.view.backgroundColor = .systemBackground
+            let text = UITextView(); text.isEditable = false; text.text = AppDelegate.archiveError?.localizedDescription ?? "Unable to open the archive."
+            text.frame = error.view.bounds; text.autoresizingMask = [.flexibleWidth, .flexibleHeight]; error.view.addSubview(text)
+            window.rootViewController = error
         }
-        settingsWindow?.showWindow(nil); settingsWindow?.window?.makeKeyAndOrderFront(nil)
+        window.makeKeyAndVisible()
     }
-    @objc private func focusSearch() { browser?.focusSearch() }
-    @objc private func showNotices() {
-        let alert = NSAlert(); alert.messageText = "Histodex"
-        alert.informativeText = "An independent, offline Codex history archive.\n\nBuilt with GRDB (MIT), swift-markdown and cmark (Apache-2.0 / BSD), and Zstandard (BSD-3-Clause). Full license notices are bundled with the application."
-        alert.addButton(withTitle: "OK"); alert.runModal()
-    }
-    private func buildMenu() {
-        let bar = NSMenu()
-        let application = NSMenu(); let app = NSMenuItem(); app.submenu = application; bar.addItem(app)
-        application.addItem(withTitle: "About Histodex", action: #selector(showNotices), keyEquivalent: "").target = self
-        application.addItem(.separator())
-        application.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
-        application.addItem(withTitle: "Quit Histodex", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        let fileMenu = NSMenu(title: "File"); let file = NSMenuItem(title: "File", action: nil, keyEquivalent: ""); file.submenu = fileMenu; bar.addItem(file)
-        fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-        let editMenu = NSMenu(title: "Edit"); let edit = NSMenuItem(title: "Edit", action: nil, keyEquivalent: ""); edit.submenu = editMenu; bar.addItem(edit)
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        editMenu.addItem(withTitle: "Search Archive", action: #selector(focusSearch), keyEquivalent: "f").target = self
-        NSApp.mainMenu = bar
+    func stateRestorationActivity(for scene: UIScene) -> NSUserActivity? {
+        guard let recordsConversationID else { return nil }
+        let activity = NSUserActivity(activityType: "com.lloydME.Histodex.records")
+        activity.userInfo = ["recordsConversationID": recordsConversationID]
+        return activity
     }
 }

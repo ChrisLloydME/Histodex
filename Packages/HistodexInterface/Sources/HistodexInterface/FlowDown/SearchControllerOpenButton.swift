@@ -6,6 +6,7 @@
 //
 
 import UIKit
+import LanguageModelChatUI
 import SnapKit
 
 class SearchControllerOpenButton: UIButton {
@@ -31,7 +32,7 @@ class SearchControllerOpenButton: UIButton {
 }
 
 extension SearchControllerOpenButton {
-    protocol Delegate: AnyObject {
+    @MainActor protocol Delegate: AnyObject {
         func searchButtonDidTap()
     }
 }

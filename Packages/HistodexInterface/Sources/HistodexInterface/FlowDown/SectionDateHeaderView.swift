@@ -7,6 +7,7 @@
 
 import SnapKit
 import UIKit
+import LanguageModelChatUI
 
 class SectionDateHeaderView: UIView {
     private let titleLabel = UILabel()

@@ -13,7 +13,7 @@ final class ArchiveItemController: UIViewController, QLPreviewControllerDataSour
     private let provenance = UILabel()
     private let pageLabel = UILabel()
     private let previous = UIButton(type: .system)
-    private let next = UIButton(type: .system)
+    private let nextPageButton = UIButton(type: .system)
     private let records = UIButton(type: .system)
     private let assets = UIButton(type: .system)
     private var offset = 0
@@ -26,10 +26,10 @@ final class ArchiveItemController: UIViewController, QLPreviewControllerDataSour
         text.isEditable = false; text.isSelectable = true; text.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         mode.selectedSegmentIndex = 0; mode.addAction(UIAction { [weak self] _ in self?.loadText() }, for: .valueChanged)
         previous.setTitle("Previous text page", for: .normal); previous.addAction(UIAction { [weak self] _ in guard let self else { return }; offset = max(0, offset - 64000); loadText() }, for: .touchUpInside)
-        next.setTitle("Next text page", for: .normal); next.addAction(UIAction { [weak self] _ in guard let self else { return }; offset += 64000; loadText() }, for: .touchUpInside)
+        nextPageButton.setTitle("Next text page", for: .normal); nextPageButton.addAction(UIAction { [weak self] _ in guard let self else { return }; offset += 64000; loadText() }, for: .touchUpInside)
         pageLabel.font = .preferredFont(forTextStyle: .caption1)
-        let pages = UIStackView(arrangedSubviews: [previous, next, pageLabel]); pages.spacing = 12
-        provenance.numberOfLines = 0; provenance.font = .preferredFont(forTextStyle: .caption2); provenance.textColor = .secondaryLabel
+        let pages = UIStackView(arrangedSubviews: [previous, nextPageButton, pageLabel]); pages.spacing = 12
+        provenance.numberOfLines = 4; provenance.lineBreakMode = .byTruncatingMiddle; provenance.font = .preferredFont(forTextStyle: .caption2); provenance.textColor = .secondaryLabel
         records.showsMenuAsPrimaryAction = true
         records.menu = UIMenu(children: items.enumerated().map { index, record in
             UIAction(title: TranscriptEntry.project([record])[0].title + " · " + ArchiveDates.full(record.timestamp)) { [weak self] _ in
@@ -72,7 +72,7 @@ final class ArchiveItemController: UIViewController, QLPreviewControllerDataSour
                 text.text = readable ? TranscriptEntry.readableText(display) : value
                 text.setContentOffset(.zero, animated: false)
                 pageLabel.text = "\(min(page + 1, item.textLength))–\(min(item.textLength, page + 64000)) of \(item.textLength)"
-                previous.isEnabled = page > 0; next.isEnabled = page + 64000 < item.textLength
+                previous.isEnabled = page > 0; nextPageButton.isEnabled = page + 64000 < item.textLength
             } catch { text.text = error.localizedDescription }
         }
     }

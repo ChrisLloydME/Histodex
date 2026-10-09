@@ -5,6 +5,7 @@
 import Combine
 import SnapKit
 import UIKit
+import LanguageModelChatUI
 
 public class MainController: UIViewController {
     let sidebarLayoutView = SafeInputView()

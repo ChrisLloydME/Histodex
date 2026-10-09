@@ -26,14 +26,14 @@ final class ArchiveChatStorage: StorageProvider, @unchecked Sendable {
 }
 
 @MainActor enum ArchiveChatProjection {
-    static func messages(rows: [ArchiveReaderRow], conversationID: String, root: URL) async -> [ConversationMessage] {
+    static func messages(rows: [ArchiveReaderRow], conversationID: String, root: URL, targetOrdinal: Int? = nil) async -> [ConversationMessage] {
         var result: [ConversationMessage] = []
         for row in rows {
             guard !Task.isCancelled else { return [] }
             var parts: [ContentPart] = []
             let body = row.preview + (row.isTruncated ? "\n\n[Preview truncated — use Read Full Text in the message menu.]" : "")
             if row.author == .supporting {
-                parts.append(.reasoning(.init(text: row.title + "\n\n" + body, isCollapsed: true)))
+                parts.append(.reasoning(.init(text: row.title + "\n\n" + body, isCollapsed: !(targetOrdinal.map(row.entry.contains) ?? false))))
             } else if !body.isEmpty { parts.append(.text(.init(text: body))) }
             for asset in row.entry.assets {
                 let name = URL(fileURLWithPath: asset.sourceReference).lastPathComponent
@@ -50,7 +50,7 @@ final class ArchiveChatStorage: StorageProvider, @unchecked Sendable {
                 parts.append(.file(.init(mediaType: asset.mimeType, data: Data(), textContent: description, name: asset.missingReason == nil ? name : "Unavailable: " + name)))
             }
             let date = ArchiveDates.date(row.entry.items[0].timestamp) ?? .distantPast
-            result.append(ConversationMessage(id: row.id, conversationID: conversationID, role: row.author == .user ? .user : .assistant, parts: parts, createdAt: date, metadata: ["histodex.archive": "true"]))
+            result.append(ConversationMessage(id: row.id, conversationID: conversationID, role: row.author == .user ? .user : .assistant, parts: parts, createdAt: date, metadata: ["histodex.archive": "true", "histodex.title": row.title]))
         }
         return result
     }

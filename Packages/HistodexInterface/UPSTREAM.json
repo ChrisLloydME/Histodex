@@ -19,6 +19,8 @@
     "Archive data sources and callbacks replace FlowDown managers",
     "Histodex branding, import action and archive status",
     "Persistent macOS sidebar; mobile drawer and inference omitted",
-    "LanguageModelChatUI controller replaces FlowDown ChatView"
+    "LanguageModelChatUI controller replaces FlowDown ChatView",
+    "Import upstream Withable helper and adapt Swift 6 UIKit delegate isolation",
+    "Explicit selection callbacks and diffable reconfiguration for refreshed archive titles"
   ]
 }

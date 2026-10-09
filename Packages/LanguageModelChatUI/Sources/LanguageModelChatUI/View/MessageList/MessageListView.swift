@@ -136,8 +136,8 @@ public final class MessageListView: UIView {
     }
 
     public func scrollToArchiveMessage(_ messageID: String?, atEnd: Bool = false) {
-        isAutoScrollingToBottom = atEnd
         listView.layoutIfNeeded()
+        isAutoScrollingToBottom = atEnd
         if atEnd { listView.setContentOffset(listView.maximumContentOffset, animated: false); return }
         let index = (0..<entryCount).first { dataSource.snapshot().item(at: $0)?.archiveMessageID == messageID }
         guard let index else { return }
@@ -176,7 +176,7 @@ public final class MessageListView: UIView {
                 UIView.animate(withDuration: 0.25) { self.alpha = 1 }
             }
         } else {
-            dataSource.applySnapshot(using: entries, animatingDifferences: true)
+            dataSource.applySnapshot(using: entries, animatingDifferences: archiveMenuProvider == nil)
             if shouldScrolling {
                 listView.scroll(to: listView.maximumContentOffset)
             }
