@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import Markdown
 
@@ -74,3 +75,5 @@ import Markdown
         return output
     }
 }
+
+#endif

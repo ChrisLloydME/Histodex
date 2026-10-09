@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 
 /// One prepared layout is shared by row sizing and rendering. Width changes invalidate the cache.
@@ -54,3 +55,5 @@ import AppKit
         height = (date == nil ? 0 : 36) + (activity ? 16 : 38) + heading + contentPadding + textHeight + imageHeight + attachmentHeight + readMore
     }
 }
+
+#endif

@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/Lakr233/LanguageModelChatUI",
+  "revision": "e7bfb39f42804e1fd8b6fb22fa64ee987f5a9fa4",
+  "license": "MIT",
+  "scope": "All Sources copied; Example and tests are not built.",
+  "changes": [
+    "Mac Catalyst platform, static linking and exact direct dependency versions",
+    "Read-only controller configuration and archive page reload",
+    "Archive menus, item scrolling, highlighting and visible-item callbacks",
+    "Assistant attachments and original file-data retention",
+    "Archived reasoning is not live inference"
+  ]
+}

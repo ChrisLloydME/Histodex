@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "HistodexCore",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v14), .iOS(.v17), .macCatalyst(.v17)],
     products: [.library(name: "HistodexCore", targets: ["HistodexCore"])],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", exact: "7.10.0"),

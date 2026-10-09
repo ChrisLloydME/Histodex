@@ -1,0 +1,24 @@
+{
+  "repository": "https://github.com/Lakr233/FlowDown",
+  "revision": "1762159fee5821298fdbc1e47d9a07da64d7ab33",
+  "license": "AGPL-3.0",
+  "sourceRoot": "FlowDown/Interface",
+  "files": {
+    "Sidebar.swift": "Sidebar/Sidebar.swift",
+    "ConversationSelectionView.swift": "ConversationSelectionView/ConversationSelectionView.swift",
+    "ConversationSelectionView+Cell.swift": "ConversationSelectionView/ConversationSelectionView+Cell.swift",
+    "SectionDateHeaderView.swift": "ConversationSelectionView/SectionDateHeaderView.swift",
+    "MainController.swift": "MainController/MainController.swift",
+    "MainController+Layout.swift": "MainController/MainController+Layout.swift",
+    "SidebarDraggerView.swift": "MainController/SidebarDraggerView.swift",
+    "SafeInputView.swift": "SupplementView/SafeInputView.swift",
+    "SearchControllerOpenButton.swift": "SupplementView/SearchControllerOpenButton.swift",
+    "SettingButton.swift": "SupplementView/SettingButton.swift"
+  },
+  "changes": [
+    "Archive data sources and callbacks replace FlowDown managers",
+    "Histodex branding, import action and archive status",
+    "Persistent macOS sidebar; mobile drawer and inference omitted",
+    "LanguageModelChatUI controller replaces FlowDown ChatView"
+  ]
+}
