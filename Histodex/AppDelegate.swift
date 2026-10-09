@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             #endif
             let store = try ArchiveStore(root: root)
             let content = ArchiveBrowserController(store: store); browser = content
+            content.onOpenSettings = { [weak self] in self?.showSettings() }
             let configuration = ArchiveSettingsController(store: store); settings = configuration
             configuration.onProgress = { [weak content] value in content?.showOperationProgress(value) }
             content.onIndexingStateChanged = { [weak configuration] busy in
