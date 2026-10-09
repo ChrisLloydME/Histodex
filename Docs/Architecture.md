@@ -13,11 +13,11 @@ Current source uses timestamped JSONL envelopes with `type` and `payload`, plus 
 ## Dependencies and rejected alternatives
 
 - [GRDB.swift](https://github.com/groue/GRDB.swift), MIT, pinned 7.10.0: established since 2015, native SQLite, migrations/transactions/FTS, no network/runtime service. Prefer its database queue and explicit SQL over a custom C binding.
-- [swift-markdown](https://github.com/swiftlang/swift-markdown), Apache-2.0 with Swift exception, pinned 0.8.0: Swift project's cmark-gfm-backed AST; native attributed-text rendering belongs in Histodex. Small dependency graph (cmark, build-time doc tooling as declared upstream).
+- [swift-markdown](https://github.com/swiftlang/swift-markdown), Apache-2.0 with Swift exception, pinned 0.8.0: Swift project's cmark-gfm-backed AST; retained for the legacy macOS renderer and its headless regressions. Small dependency graph (cmark, build-time doc tooling as declared upstream).
 - [Zstandard](https://github.com/facebook/zstd), BSD-3-Clause or GPLv2 (choose BSD), pinned `d9c0c7e2cf8a8bf9fb98d3bee546dcf8dc9ac59a`: use official `libzstd` product and stable streaming C API through a narrow Swift reader. The v1.5.7 release lacks its current SPM manifest; a fixed upstream revision gives reproducibility without relying on a moving branch. Review updates deliberately.
 - [SwiftZSTD](https://github.com/aperedera/SwiftZSTD) provides streaming wrappers, but its current manifest depends on a zstd semantic release whose SPM manifest is absent. The official library plus a narrow streaming bridge avoids that integration issue.
 - [ainame/swift-codex](https://github.com/ainame/swift-codex) is an app-server SDK requiring an installed Codex process; it is not an offline rollout parser. [chrischabot/codex-swift](https://github.com/chrischabot/codex-swift) implements an agent harness with networking/execution/persistence; importing that surface is unsuitable. Search did not identify an established, focused, offline Swift rollout reader. Implement a small tolerant adapter, without embedding the Rust runtime.
-- [swift-markdown-engine](https://github.com/nodes-app/swift-markdown-engine), Apache-2.0, is an interactive editing framework. Its editor and rendering dependencies exceed a read-only paginated transcript's needs. Start with swift-markdown AST and NSTextView, not a web renderer or custom Markdown parser.
+- [swift-markdown-engine](https://github.com/nodes-app/swift-markdown-engine), Apache-2.0, is an interactive editing framework. Its editor and rendering dependencies exceed a read-only paginated transcript's needs. The original AppKit implementation used swift-markdown AST and NSTextView; the current chat renderer uses FlowDown’s MarkdownView/Litext stack.
 - Foundation file access, CryptoKit SHA-256 and ImageIO thumbnailing cover filesystem/hashing/images without additional packages.
 
 All dependencies build locally and need no network at runtime. Resolved revisions and required license notices are retained.
@@ -36,11 +36,15 @@ Stream fixed-size reads and decompression buffers; bound individual JSON record 
 
 ## Assets
 
-Extract inline image data, generated-image results, known local references and structured tool-result images. SHA-256 content-addressed filesystem storage with MIME, byte size, dimensions and original reference metadata. Copy external images only through available read grants, never request network resources. Missing/unreadable paths remain visible with reasons. Deduplicate bytes across sessions. Images decode only for visible rows; ImageIO creates bounded thumbnails. Raw snapshots preserve original encoded payloads, so normalized storage does not need duplicate Base64 bodies.
+Extract inline image data, generated-image results, known local references and structured tool-result images. SHA-256 content-addressed filesystem storage with MIME, byte size, dimensions and original reference metadata. Copy external images only through available read grants, never request network resources. Missing/unreadable paths remain visible with reasons. Deduplicate bytes across sessions. ImageIO creates bounded thumbnails for the current page; original asset bytes stay outside the chat projection. Raw snapshots preserve original encoded payloads, so normalized storage does not need duplicate Base64 bodies.
 
 ## Native interface
 
-AppKit NSWindowController/NSSplitViewController, sidebar NSTableView and reusable transcript rows. Use a bounded database page/window with ordinal navigation and exact search jumps, avoiding thousands of views and eager text/image decoding. Selectable NSTextView uses native Markdown attributed strings; code and tool output use monospace text and disclosure. Store per-conversation item/scroll position. Sidebar supports title/project/date and archive-wide search. Show import progress, failure diagnostics and empty/missing-asset states. No SwiftUI bridge is needed initially.
+The application uses UIKit on Mac Catalyst so actual FlowDown UI source can run without an AppKit rewrite. `HistodexInterface` adapts FlowDown's sidebar, conversation list, macOS layout and sidebar dragger. Its root controller instantiates the authors' extracted `LanguageModelChatUI.ChatViewController`. Upstream ListViewKit virtualizes rows and MarkdownView/Litext render selectable messages, tables and code. The former AppKit main window and transcript cells are removed.
+
+`ArchiveReaderPage` projects bounded archive items into an in-memory `StorageProvider`; the chat library never writes imported messages or configures a model. Read-only hooks support page reload, exact search targets, menus and visible-item tracking. Database pages remain limited to 100 items; thumbnails are bounded to 800 pixels and decoded off the main actor for the current page. Settings, full-text inspection and Quick Look attachment access use Catalyst controllers backed by HistodexCore. Multiple scenes provide separate all-records browsing without overwriting the main reader's saved position.
+
+The parser, database schema, scoped search, snapshots, source bookmarks and provenance stay in HistodexCore. `NativeMarkdown` and `TranscriptLayout` remain macOS-only legacy helpers for existing headless regressions; the application does not use them. [FlowDown Reference](FlowDownReference.md) records source revisions and licenses.
 
 ## Risks to validate
 
@@ -53,8 +57,7 @@ Archive schema v2 adds persistent source aliases for content-deduplicated snapsh
 
 ## Conversation presentation revision
 
-The Messages-inspired AppKit interface adds an owned `TranscriptEntry` display projection and a shared `TranscriptLayout` geometry cache. Routine events are grouped for disclosure without deleting archive items; exact search targets remain resolvable inside groups. Native `NSSplitViewController` and unified-toolbar navigation replace the original header/control stacks. Source permissions and maintenance move into an independent Settings controller. The database adds only a bounded conversation-preview query and optional reading-position lookup; the archive schema and import adapter are unchanged by this presentation revision. See ConversationDesign.md.
-
+`TranscriptEntry` and `ArchiveReaderPage` group supporting records while retaining their original item identities. Exact search targets resolve inside groups and expand the reused reasoning disclosure. Archive menus open readable or archived text in 64,000-character pages. Settings owns read-only source selection and maintenance. The interface migration does not change the archive schema or import adapter. See ConversationDesign.md.
 
 ## Record semantics and title repair (2026-09-07)
 

@@ -1,21 +1,20 @@
 # Conversation interface
 
-The main window follows [FlowDown's macOS interface](https://github.com/Lakr233/FlowDown), implemented independently in AppKit. [FlowDown Reference](FlowDownReference.md) records the inspected commit and source components. Histodex retains its offline archive model, import pipeline, search and native Markdown rendering.
+The main window runs reused [FlowDown](https://github.com/Lakr233/FlowDown) UIKit components on Mac Catalyst. The authors' extracted LanguageModelChatUI supplies the actual chat controller and message renderer. [FlowDown Reference](FlowDownReference.md) lists vendored source revisions, file mappings, licenses and local adaptations.
 
 ## Window and navigation
 
-- A persistent, resizable sidebar has Histodex branding and an import-settings action at the top. Settings, archive count and search shortcuts sit at the bottom. Search remains visible above the list and supports ⌘F.
-- Conversation rows use document symbols and subtle rounded accent selection. Creation-date headings group normal browsing; each row keeps a project/date subtitle. Search switches to one result section with snippets and exact-item targets. Date headings cannot be selected, and list refreshes preserve selection by conversation/item identity.
-- The reading surface is inset by 10 points, with 10-point corners and a thin system separator. Its 64-point header has a document symbol, a centered truncating title, project context and Conversation Info. Title and project fields stay inside the detail pane. Native window titles retain the selected conversation for system window lists.
-- New conversations open at their latest page. Existing reading positions restore to the saved item. Earlier/later controls appear at transcript edges, with database requests bounded to 100 items. The read-only footer also offers Latest Messages (Latest Records in the record browser).
-- Time separators appear at meaningful gaps. Both roles share one centered column, capped at 800 points. User messages align to its trailing edge with a light accent background, native text colors and 12-point corners. Assistant Markdown flows directly on the reading surface. Message details, attachments and full-text actions stay accessible.
-- The empty reader explains how to select or import history and includes an Archive Settings button. An empty selected conversation points to Conversation Info for supporting records.
+- FlowDown's persistent resizable sidebar, drag handle, conversation cells, date headers and settings/search controls are retained. Archive callbacks replace its application managers. Search opens through the sidebar button or ⌘F; normal browsing groups by creation date and search shows exact-item results.
+- FlowDown's Catalyst layout composes the sidebar and inset reading surface. The actual ChatViewController renders the title/menu header, user messages, assistant Markdown, date separators, attachments and supporting-record disclosures. The message input is hidden and inactive; no model is configured.
+- New conversations open at the latest page. Saved positions restore to their item. Earlier/Later/Latest footer actions load bounded pages of 100 archive items. Exact search hits scroll to and highlight their containing row.
+- Each message has an ellipsis menu for displayed-text copying, full-text reading or details. Original text is paged in the inspector; grouped entries expose individual source records and owned attachments through Quick Look.
+- Empty states explain archive selection/import. The sidebar + action and gear open the same settings controller. Window scene titles retain the conversation name for system window lists.
 
 ## Presentation boundary
 
 `CodexAdapter` assigns an explicit `RecordCategory` before records enter SQLite. The primary reader, its search results, preview and item counts use conversation items: actual user/assistant messages and image output. Role alone is not evidence of user authorship. Complete injected context envelopes, system/developer instructions, coordination messages, execution activity and bookkeeping are preserved in their appropriate categories.
 
-Conversation Info → Browse All Records opens a separate, paginated, searchable archive window for supporting records as well as messages. Its navigation does not overwrite the main reader's saved position. Confirmed event/response mirrors remain paired; all original bytes remain in snapshots.
+The conversation header menu → Browse All Records opens a separate, paginated, searchable archive window for supporting records as well as messages. Its navigation does not overwrite the main reader's saved position. Confirmed event/response mirrors remain paired; all original bytes remain in snapshots.
 
 `TranscriptEntry` only formats the records supplied by the database scope; it does not decide which source records constitute a conversation.
 
@@ -25,7 +24,7 @@ Conversation Info → Browse All Records opens a separate, paginated, searchable
 - Messages render as selectable text, with visible full-text access when previews are truncated. The details window pages through complete text and allows selection of individual grouped records.
 - Attachments stay with their entry. Missing files use a short unavailable-attachment label; the full reason and provenance remain in details.
 
-`TranscriptLayout` prepares attributed text and geometry once per entry/width/expansion state. Both table row sizing and cell rendering use that same result. Width changes invalidate cached layouts only when the width changes, preventing repeated Markdown parsing on every layout pass. Large expanded text uses a bounded scrollable viewport, and image decoding remains lazy.
+ListViewKit provides upstream row reuse and sizing, and MarkdownView caches parsed Markdown packages. The adapter holds only one bounded page; long previews remain bounded independently of complete archived text. Supporting records use the actual upstream reasoning disclosure, with archived record titles instead of live thinking labels. This presentation does not run inference or mutate archive messages.
 
 ## Titles and upgrades
 
@@ -39,12 +38,12 @@ Discovery and title copying show indeterminate progress; copying and normalizati
 
 ## Settings and progress
 
-Histodex → Settings (⌘,), the sidebar gear, the top import action and the initial empty-state action all open the same settings window. Settings owns folder selection, read-only bookmarks, archive updates, cancellation, errors, archive location and index rebuilding. Closing Settings does not cancel an import.
+⌘,, the sidebar gear and the top + action open the same Settings sheet. Settings owns folder selection, read-only bookmarks, archive updates, cancellation, errors, archive location and index rebuilding. Closing Settings does not cancel an import.
 
-Archive operations display their phase and progress in the sidebar and Settings. Startup repair disables search and conflicting archive maintenance until it finishes. The footer shows the total local conversation count.
+Archive operations display their phase and progress in the sidebar and Settings. Startup repair disables search and conflicting archive maintenance until it finishes. The sidebar status shows the total local conversation count. Settings also exposes bundled acknowledgements.
 
 ## Validation
 
 For the FlowDown migration, neither Histodex nor FlowDown is launched. FlowDown is read only as a temporary source checkout and is not compiled. Validation uses compile-only Histodex builds, headless HistodexCore tests and source review. No runtime screenshots or interaction inspection are performed, so visual fidelity is not claimed to be verified.
 
-Presentation tests cover role identity, grouped supporting records, bounded previews, cached geometry, Markdown line breaks/tables, native outgoing link colors, retained inline-code styles, and a shared centered reading column at narrow and wide widths. Existing archive tests cover scoped search, exact-item targets, provenance, import and rebuild behavior.
+Headless tests cover the new archive projection's role identity, bounded previews, grouped exact-item lookup and retained provenance, plus existing scoped search, import and rebuild behavior. Legacy AppKit Markdown/layout tests remain useful core regressions but do not validate the new UIKit rendering. Runtime appearance, keyboard behavior, scene restoration and interaction remain unverified under the user's no-launch constraint.

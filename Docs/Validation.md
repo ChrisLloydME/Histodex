@@ -14,7 +14,7 @@
 
 - JSON decoding: at most 32 MiB per record. Larger lines are streamed past and represented by a diagnostic with their complete raw byte range. No raw bytes are discarded.
 - SQLite transcript pages: up to 200 items per API request (UI uses 100), at most 12,000 text characters per item preview. Inspect reads text in 64,000-character pages. The full normalized text remains indexed.
-- External assets: 256 MiB per file. Image thumbnails decode to bounded pixel sizes for visible rows only. Remote URLs are retained as unavailable assets, never fetched automatically.
+- External assets: 256 MiB per file. Image thumbnails decode to bounded pixel sizes for the current page. Remote URLs are retained as unavailable assets, never fetched automatically.
 - Zstandard decoder window: 128 MiB. Incomplete/corrupt frames preserve the compressed raw copy and report a failed import; the last complete conversation remains available.
 - Inherited history: maximum 32 levels, with cycle/missing-parent notices. Explicit byte bounds must end on a JSONL record boundary. Physical rollout identities come from source filenames; source aliases survive reparsing.
 - Search returns the first 100 ranked hits (API supports up to 500). Sidebar metadata queries support up to 10,000 conversations. These are explicit UI/API bounds, not archive retention limits.
@@ -27,8 +27,8 @@
 - Mirrors are paired conservatively across nearby opposite source representations, with turn checks; raw records and asset links remain preserved. Unusual older producer layouts may still show duplicate transcript entries.
 - Compaction replacement context is retained in raw snapshots and distinguished from the chronological transcript; it is not replayed as a second conversation. Subagent visibility/projection semantics beyond inherited prefixes are not exhaustively modeled.
 - Full raw snapshots remain uncompressed when imported plain; compressed inputs also retain a decoded copy for seekable byte provenance. Plan disk capacity for independent copies and historical revisions.
-- Reading restoration returns to an item, not a pixel within a long item. Native Markdown supports text, code, headings, lists, quotes, links and basic tab-separated table presentation. There is no syntax-highlighting dependency or browser renderer.
-- File-asset thumbnails are generated on demand; the reserved thumbnail directory is not yet a persistent cache. Generic binary/audio assets are preserved where recognized, but the initial inspector only previews images.
+- Reading restoration returns to an item, not a pixel within a long item. The reused MarkdownView/Litext renderer provides code highlighting and tables; no browser renderer is used.
+- File-asset thumbnails are generated on demand; the reserved thumbnail directory is not yet a persistent cache. Generic binary/audio assets are preserved where recognized, and the current inspector uses Quick Look for owned files.
 - The development signature is not a distribution signature. Complete visual testing, Developer ID signing and notarization before public distribution.
 
 
@@ -51,10 +51,12 @@ All 52 headless tests pass with both optional private fixture sets enabled. Thre
 
 The final compile-only Xcode build succeeds. No application launch or Computer Use was performed; layout validation used the supplied comparison and AppKit source/constraint review.
 
-## FlowDown interface migration (2026-10-09)
+## FlowDown code reuse (2026-10-09)
 
-Histodex's main window now uses a source-informed AppKit adaptation of FlowDown's macOS navigation and reading layout. The reference revision and inspected components are recorded in [FlowDown Reference](FlowDownReference.md).
+The initial independent AppKit imitation was removed. Histodex now builds as Mac Catalyst using actual FlowDown sidebar/layout source and the authors' extracted LanguageModelChatUI chat framework. [FlowDown Reference](FlowDownReference.md) documents provenance, licenses and adaptations.
 
-The Histodex compile-only build succeeds. The headless core suite discovers 54 tests: 52 pass, 2 optional private-fixture tests skip, and there are no failures. The 12 presentation tests include new coverage for the shared centered reading column at 320/480/1100/1800-point widths and retained native user-text/inline-code colors. Existing scoped-search and exact-target regressions continue to pass. Source review also checks nonselectable date sections, selection preservation across list refreshes, settings callbacks and bounded title constraints.
+The compile-only, ad-hoc signed Histodex Catalyst build succeeds with Xcode 27 / Swift 6.4, and `codesign --verify --strict` passes. The built app retains App Sandbox, read-only user-selected access and app-scoped bookmarks, with no network entitlement. Its minimum macOS version is 14.0; 23 license notices are bundled. The headless HistodexCore suite discovers 57 tests: 55 pass, 2 optional private-fixture tests skip, and there are no failures. New projection regressions verify role identity, bounded preview/full-length metadata and grouped exact-item provenance. Existing scoped search, archive maintenance and persistence regressions pass. Legacy AppKit layout tests do not establish the UIKit renderer's runtime behavior.
 
-Neither Histodex nor FlowDown was launched. FlowDown was not compiled, and its installed app or data was not accessed. No app-hosted tests, UI tests, screenshots or runtime visual verification were performed. Build products and test-generated fixtures stay in ignored `.tmp/`. The preexisting Beta bundle identifier change remains outside the UI commits.
+Neither Histodex nor FlowDown was launched. The FlowDown application and example targets were not compiled; only reused source components and Histodex dependencies were built. Installed FlowDown preferences/data were not accessed. No app-hosted tests, UI tests, screenshots or runtime visual verification were performed. Build products and synthetic fixtures stay in ignored `.tmp/`. The preexisting Release Beta bundle identifier remains outside the UI commits.
+
+The current reader uses upstream MarkdownView/Litext with code highlighting and tables; the original inspector now supports owned attachments via Quick Look. Thumbnails are bounded to 800 pixels for the current database page. Multiwindow behavior, folder picker interactions, actual UI geometry and reading restoration still require runtime verification when authorized.
